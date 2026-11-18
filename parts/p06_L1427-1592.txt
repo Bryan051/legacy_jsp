@@ -1,0 +1,167 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 06/10 · 원본 1427-1592줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+1427 |     } else if ("collectSave".equals(cmd)) {
+1428 |         // ---------------------------------------------------------- 수금 등록 : 수금 -> (청구를 다 받으면) 수주 상태 -> 거래처 여신상태  (2020.04 홍길동 고객 요청)
+1429 |         String strBillId = request.getParameter("billId");
+1430 |         String strOrderId = request.getParameter("orderId");               // 화면의 hidden 값
+1431 |         String strCustId = request.getParameter("custId");                 // 화면의 hidden 값
+1432 |         long lAmt = toLong(request.getParameter("collectAmt"), 0L);
+1433 |         Connection conn = null;
+1434 |         try {
+1435 |             conn = getConn();
+1436 |             conn.setAutoCommit(false);
+1437 |             if (lAmt <= 0L) throw new Exception("수금액을 확인하세요.");
+1438 |             execUpdate(conn, "INSERT INTO TB_COLLECT (COLLECT_ID, BILL_ID, ORDER_ID, CUST_ID, COLLECT_DT, COLLECT_AMT, COLLECT_METHOD, REG_USER_ID, REG_DT) "
+1439 |                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+1440 |                 new Object[] { genId("CL"), strBillId, nvl(strOrderId, null), strCustId, nvl(request.getParameter("collectDt"), today("yyyy-MM-dd")),
+1441 |                                lAmt, request.getParameter("collectMethod"), loginId });
+1442 |             // 청구 건을 다 받았으면 수주 상태를 '수금완료' 로
+1443 |             long lBalance = queryLong(conn, "SELECT B.TOTAL_AMT - IFNULL((SELECT SUM(L.COLLECT_AMT) FROM TB_COLLECT L WHERE L.BILL_ID = B.BILL_ID), 0) "
+1444 |                                           + "FROM TB_BILL B WHERE B.BILL_ID = ?", new Object[] { strBillId }, 1L);
+1445 |             if (lBalance <= 0L) {
+1446 |                 changeOrderStatus(conn, strOrderId, "수금완료");
+1447 |             }
+1448 |             // 거래처 미수 합계에 따라 여신상태 변경 (미수 없음 01 / 미수 있음 02)
+1449 |             updateCreditStatus(conn, strCustId, custArrearsAmt(conn, strCustId) <= 0L ? "01" : "02");
+1450 |             conn.commit();
+1451 |             printJson(response, out, "{\"ok\":true,\"balance\":" + lBalance + "}");
+1452 |         } catch (Exception e) {
+1453 |             rollbackQuietly(conn);
+1454 |             printFail(response, out, e);
+1455 |         } finally {
+1456 |             closeAll(null, null, conn);
+1457 |         }
+1458 |         return;
+1459 |     } else if ("arrearsData".equals(cmd)) {
+1460 |         // ---------------------------------------------------------- 미수 목록 (JSON) : 대시보드가 부른다.  화면(arrearsList)의 SQL 을 복사해 왔다 (2021.03)
+1461 |         int iOverdue = toInt(request.getParameter("overdueDays"), 0);
+1462 |         Connection conn = null;
+1463 |         try {
+1464 |             conn = getConn();
+1465 |             List<HashMap<String, Object>> list = queryList(conn,
+1466 |                 "SELECT B.BILL_ID, B.CUST_ID, C.CUST_NM, B.BILL_DT, B.TOTAL_AMT, IFNULL(P.PAID_AMT, 0) AS PAID_AMT, "
+1467 |               + "B.TOTAL_AMT - IFNULL(P.PAID_AMT, 0) AS ARREARS_AMT, DATEDIFF(NOW(), B.BILL_DT) AS OVERDUE_DAYS "
+1468 |               + "FROM TB_BILL B INNER JOIN TB_CUSTOMER C ON C.CUST_ID = B.CUST_ID "
+1469 |               + "LEFT OUTER JOIN (SELECT BILL_ID, SUM(COLLECT_AMT) AS PAID_AMT FROM TB_COLLECT GROUP BY BILL_ID) P ON P.BILL_ID = B.BILL_ID "
+1470 |               + "WHERE B.ISSUE_STATUS = '10' AND B.TOTAL_AMT - IFNULL(P.PAID_AMT, 0) > 0 AND DATEDIFF(NOW(), B.BILL_DT) >= ? "
+1471 |               + "ORDER BY OVERDUE_DAYS DESC, B.BILL_ID", new Object[] { iOverdue });
+1472 |             printJson(response, out, "{\"ok\":true,\"list\":" + toJson(list) + "}");
+1473 |         } catch (Exception e) {
+1474 |             printFail(response, out, e);
+1475 |         } finally {
+1476 |             closeAll(null, null, conn);
+1477 |         }
+1478 |         return;
+1479 |     } else if ("salesExcel".equals(cmd)) {
+1480 |         // ---------------------------------------------------------- 매출 상세 엑셀 : 조건은 salesReport 화면과 같다
+1481 |         List<Object> params = new ArrayList<Object>();
+1482 |         String strWhere = salesWhereSql(request, params, authCd, loginId);
+1483 |         Connection conn = null;
+1484 |         try {
+1485 |             conn = getConn();
+1486 |             List<HashMap<String, Object>> list = queryList(conn,
+1487 |                 "SELECT C.CUST_NM, U.USER_NM AS CHARGE_USER_NM, O.ORDER_ID, O.ORDER_DT, O.ORDER_STATUS, P.PRODUCT_NM, OI.QTY, OI.AMT AS ITEM_AMT, "
+1488 |               + "B.TOTAL_AMT AS BILL_AMT, IFNULL(CL.COLLECT_AMT, 0) AS COLLECT_AMT" + salesFromSql() + strWhere
+1489 |               + " ORDER BY O.ORDER_DT DESC, C.CUST_NM, P.PRODUCT_NM", params.toArray());
+1490 |             out.clear();
+1491 |             response.setContentType("application/vnd.ms-excel; charset=UTF-8");
+1492 |             response.setHeader("Content-Disposition", "attachment; filename=sales_" + today("yyyyMMdd") + ".xls");
+1493 |             out.println("<table border=\"1\"><tr><th>거래처</th><th>담당자</th><th>수주번호</th><th>수주일</th><th>상태</th><th>제품</th><th>수량</th><th>금액</th><th>청구금액</th><th>수금액</th></tr>");
+1494 |             for (HashMap<String, Object> r : list) {
+1495 |                 out.println("<tr><td>" + esc(r.get("CUST_NM")) + "</td><td>" + esc(r.get("CHARGE_USER_NM")) + "</td><td>" + esc(r.get("ORDER_ID"))
+1496 |                           + "</td><td>" + esc(r.get("ORDER_DT")) + "</td><td>" + esc(r.get("ORDER_STATUS")) + "</td><td>" + esc(r.get("PRODUCT_NM"))
+1497 |                           + "</td><td>" + r.get("QTY") + "</td><td>" + r.get("ITEM_AMT") + "</td><td>" + esc(r.get("BILL_AMT")) + "</td><td>" + r.get("COLLECT_AMT") + "</td></tr>");
+1498 |             }
+1499 |             out.println("</table>");
+1500 |         } catch (Exception e) {
+1501 |             out.print("다운로드 중 오류 : " + esc(e.getMessage()));
+1502 |         } finally {
+1503 |             closeAll(null, null, conn);
+1504 |         }
+1505 |         return;
+1506 |     } else if ("batchArrears".equals(cmd)) {
+1507 |         // ---------------------------------------------------------- 미수 안내 메일 배치 (평일 09:00 cron)   2022.05 홍길동
+1508 |         if (!BATCH_KEY.equals(request.getParameter("key"))) {
+1509 |             response.setStatus(403);
+1510 |             out.print("forbidden");
+1511 |             return;
+1512 |         }
+1513 |         Connection conn = null;
+1514 |         try {
+1515 |             conn = getConn();
+1516 |             String strRes = runArrearsNotice(conn);
+1517 |             out.clear();
+1518 |             response.setContentType("text/plain; charset=UTF-8");
+1519 |             out.print(strRes);
+1520 |         } catch (Exception e) {
+1521 |             out.print("ERROR " + e.getMessage());
+1522 |         } finally {
+1523 |             closeAll(null, null, conn);
+1524 |         }
+1525 |         return;
+1526 |     } else if ("batchClose".equals(cmd)) {
+1527 |         // ---------------------------------------------------------- 월마감 배치 (매월 1일 01:30 cron) : 전월까지 마감   2022.05 홍길동
+1528 |         if (!BATCH_KEY.equals(request.getParameter("key"))) {
+1529 |             response.setStatus(403);
+1530 |             out.print("forbidden");
+1531 |             return;
+1532 |         }
+1533 |         Calendar calPrev = Calendar.getInstance();
+1534 |         calPrev.add(Calendar.MONTH, -1);
+1535 |         String strCloseYm = new SimpleDateFormat("yyyyMM").format(calPrev.getTime());
+1536 |         Connection conn = null;
+1537 |         try {
+1538 |             conn = getConn();
+1539 |             String strRes = runMonthClose(conn, strCloseYm);
+1540 |             out.clear();
+1541 |             response.setContentType("text/plain; charset=UTF-8");
+1542 |             out.print(strRes);
+1543 |         } catch (Exception e) {
+1544 |             out.print("ERROR " + e.getMessage());
+1545 |         } finally {
+1546 |             closeAll(null, null, conn);
+1547 |         }
+1548 |         return;
+1549 |     } else if ("batchAll".equals(cmd)) {
+1550 |         // ---------------------------------------------------------- 일괄 배치 : 캐시 갱신 + 미수 안내 + 만료 견적 정리 + 월마감 + 결과 공지
+1551 |         //   월초에 cron 이 한 번에 부른다 (2023.01 김철수).  동시에 두 번 돌지 않게 application 에 실행 중 표시를 남긴다
+1552 |         if (!BATCH_KEY.equals(request.getParameter("key"))) {
+1553 |             response.setStatus(403);
+1554 |             out.print("forbidden");
+1555 |             return;
+1556 |         }
+1557 |         if (application.getAttribute("BATCH_RUNNING") != null) {
+1558 |             out.print("이미 실행 중 : " + application.getAttribute("BATCH_RUNNING"));
+1559 |             return;
+1560 |         }
+1561 |         application.setAttribute("BATCH_RUNNING", today("yyyy-MM-dd HH:mm:ss"));
+1562 |         Calendar calPrev = Calendar.getInstance();
+1563 |         calPrev.add(Calendar.MONTH, -1);
+1564 |         String strCloseYm = new SimpleDateFormat("yyyyMM").format(calPrev.getTime());
+1565 |         StringBuffer sbRes = new StringBuffer();
+1566 |         Connection conn = null;
+1567 |         try {
+1568 |             conn = getConn();
+1569 |             loadCodeCache(true);
+1570 |             sbRes.append(runArrearsNotice(conn)).append("\n");
+1571 |             sbRes.append("만료 견적 " + expireQuotes(conn) + "건 종결\n");
+1572 |             sbRes.append(runMonthClose(conn, strCloseYm)).append("\n");
+1573 |             // 결과를 공지사항에도 남긴다 (영업팀이 공지에서 보고 싶다고 해서)
+1574 |             execUpdate(conn, "INSERT INTO TB_NOTICE (TITLE, CONTENT, WRITER_ID, VIEW_CNT, TOP_YN, REG_DT) VALUES (?, ?, 'BATCH', 0, 'N', NOW())",
+1575 |                 new Object[] { "[배치] " + today("yyyy-MM-dd") + " 실행 결과", sbRes.toString() });
+1576 |             out.clear();
+1577 |             response.setContentType("text/plain; charset=UTF-8");
+1578 |             out.print(sbRes.toString());
+1579 |         } catch (Exception e) {
+1580 |             out.print("ERROR " + e.getMessage());
+1581 |         } finally {
+1582 |             application.removeAttribute("BATCH_RUNNING");
+1583 |             closeAll(null, null, conn);
+1584 |         }
+1585 |         return;
+1586 |     //  } else if ("oldSalesReport".equals(cmd)) {
+1587 |     //      // 2021.03 첫 버전 매출 리포트 (TB_ORDER 만 읽음).  salesReport 로 바꾸면서 막았다 - 지우지 말라고 해서 그냥 둠
+1588 |     //      Connection conn = getConn();
+1589 |     //      ResultSet rs = conn.createStatement().executeQuery("SELECT CUST_ID, SUM(ORDER_AMT) FROM TB_ORDER GROUP BY CUST_ID");
+1590 |     //      while (rs.next()) { out.println(rs.getString(1) + "," + rs.getLong(2)); }
+1591 |     }   // ---- [처리 전용 cmd] 끝.  여기까지 안 걸린 cmd 는 아래 화면 cmd 로 내려간다
+1592 | %>

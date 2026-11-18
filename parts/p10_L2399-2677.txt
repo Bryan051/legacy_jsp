@@ -1,0 +1,280 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 10/10 · 원본 2399-2677줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+2399 |     } else if ("contractList".equals(cmd)) {
+2400 |         // 계약 목록 : 금액 변경 · 계약서 첨부는 행마다 따로 처리한다 (2016.09 화면이라 직접 JDBC)
+2401 |         List<HashMap<String, Object>> contractRows = new ArrayList<HashMap<String, Object>>();
+2402 |         Connection conn = null;
+2403 |         Statement st = null;
+2404 |         ResultSet rs = null;
+2405 |         try {
+2406 |             conn = getConn();
+2407 |             st = conn.createStatement();
+2408 |             String strCtSql = "SELECT T.CONTRACT_ID, T.ORDER_ID, C.CUST_NM, T.CONTRACT_NM, T.CONTRACT_AMT, T.START_DT, T.END_DT, T.STATUS_CD "
+2409 |                     + "FROM TB_CONTRACT T LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = T.CUST_ID";
+2410 |             if ("USER".equals(authCd)) {                    // 영업사원은 본인 담당 거래처만
+2411 |                 strCtSql += " WHERE C.CHARGE_USER_ID = '" + loginId + "'";
+2412 |             }
+2413 |             rs = st.executeQuery(strCtSql + " ORDER BY T.REG_DT DESC LIMIT 100");
+2414 |             while (rs.next()) {
+2415 |                 HashMap<String, Object> row = new HashMap<String, Object>();
+2416 |                 for (String k : new String[] { "CONTRACT_ID", "ORDER_ID", "CUST_NM", "CONTRACT_NM", "CONTRACT_AMT", "START_DT", "END_DT", "STATUS_CD" }) {
+2417 |                     row.put(k, rs.getObject(k));
+2418 |                 }
+2419 |                 contractRows.add(row);
+2420 |             }
+2421 |         } catch (Exception e) {
+2422 |             printErr(out, "계약 조회", e);
+2423 |         } finally {
+2424 |             closeAll(rs, st, conn);
+2425 |         }
+2426 | %>
+2427 | <h2>계약</h2>
+2428 | <table class="list">
+2429 |     <thead><tr><th>계약</th><th>거래처</th><th>기간</th><th>상태</th><th>금액 변경</th><th>계약서 첨부</th></tr></thead>
+2430 |     <tbody>
+2431 | <% for (HashMap<String, Object> t : contractRows) { %>
+2432 |         <tr><td><%= esc(t.get("CONTRACT_NM")) %></td><td><%= esc(t.get("CUST_NM")) %></td><td><%= t.get("START_DT") %> ~ <%= t.get("END_DT") %></td>
+2433 |             <td><%= "10".equals(t.get("STATUS_CD")) ? "진행" : "종료" %></td>
+2434 |             <td><form onsubmit="return false;">
+2435 |                 <input type="hidden" name="contractId" value="<%= t.get("CONTRACT_ID") %>"/>
+2436 |                 <input type="hidden" name="orderId" value="<%= t.get("ORDER_ID") %>"/>
+2437 |                 <input type="text" name="contractAmt" size="12" value="<%= t.get("CONTRACT_AMT") %>" onkeyup="numOnly(this)"/>
+2438 |                 <button type="button" class="btn" onclick="fnAmt(this)">변경</button></form></td>
+2439 |             <td><input type="file" id="file_<%= t.get("CONTRACT_ID") %>"/> <button type="button" class="btn" onclick="fnUpload('<%= t.get("CONTRACT_ID") %>')">첨부</button></td></tr>
+2440 | <% } %>
+2441 |     </tbody>
+2442 | </table>
+2443 | <script type="text/javascript">
+2444 | function fnAmt(btn) {
+2445 |     callCmd('contractAmtUpdate', formToParams(btn.form), function() { alert('계약 금액과 수주 금액을 같이 바꿨습니다.'); goCmd('contractList'); });
+2446 | }
+2447 | function fnUpload(contractId) {
+2448 |     var file = document.getElementById('file_' + contractId).files[0];
+2449 |     if (!file) { alert('파일을 고르세요.'); return; }
+2450 |     var xhr = new XMLHttpRequest();
+2451 |     xhr.open('POST', thisPage + '?cmd=contractFile&contractId=' + contractId + '&fileName=' + encodeURIComponent(file.name), true);
+2452 |     xhr.onload = function() { alert('첨부했습니다.'); };
+2453 |     xhr.send(file);
+2454 | }
+2455 | </script>
+2456 | <%
+2457 |     } else if ("billList".equals(cmd)) {
+2458 |         // 청구 목록 + 수기 발행 : 발행할 수주는 수주 표에서 '계약완료' 인 것을 직접 읽어 고르게 한다
+2459 |         List<HashMap<String, Object>> billRows = new ArrayList<HashMap<String, Object>>();
+2460 |         List<HashMap<String, Object>> readyOrders = new ArrayList<HashMap<String, Object>>();
+2461 |         Connection conn = null;
+2462 |         try {
+2463 |             conn = getConn();
+2464 |             billRows = queryList(conn, "SELECT B.BILL_ID, B.ORDER_ID, B.CUST_ID, C.CUST_NM, B.BILL_DT, B.TOTAL_AMT, B.ETAX_NO, B.ISSUE_STATUS "
+2465 |                     + "FROM TB_BILL B LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = B.CUST_ID ORDER BY B.BILL_DT DESC, B.BILL_ID DESC LIMIT 100", null);
+2466 |             readyOrders = queryList(conn, "SELECT O.ORDER_ID, O.CUST_ID, C.CUST_NM, O.CONTRACT_ID, O.ORDER_AMT FROM TB_ORDER O "
+2467 |                     + "INNER JOIN TB_CUSTOMER C ON C.CUST_ID = O.CUST_ID WHERE O.ORDER_STATUS = '계약완료' ORDER BY O.ORDER_DT", null);
+2468 |         } catch (Exception e) {
+2469 |             printErr(out, "청구 조회", e);
+2470 |         } finally {
+2471 |             closeAll(null, null, conn);
+2472 |         }
+2473 | %>
+2474 | <h2>청구</h2>
+2475 | <form name="frmBill" onsubmit="return false;" class="searchbox">
+2476 |     <input type="hidden" name="custId" value=""/><input type="hidden" name="orderId" value=""/><input type="hidden" name="contractId" value=""/>
+2477 |     수기 발행 수주 <select name="pick" onchange="fnPick(this)"><option value="">선택</option>
+2478 | <% for (HashMap<String, Object> ro : readyOrders) { %>
+2479 |         <option value="<%= ro.get("ORDER_ID") %>" data-cust="<%= ro.get("CUST_ID") %>" data-contract="<%= ro.get("CONTRACT_ID") %>" data-amt="<%= ro.get("ORDER_AMT") %>"><%= esc(ro.get("CUST_NM")) %> / <%= ro.get("ORDER_ID") %></option>
+2480 | <% } %>
+2481 |     </select> 공급가액 <input type="text" name="supplyAmt" size="12" onkeyup="numOnly(this)"/>
+2482 |     <button type="button" class="btn btn-main" onclick="fnIssue()">발행</button>
+2483 | </form>
+2484 | <table class="list">
+2485 |     <thead><tr><th>청구번호</th><th>거래처</th><th>청구일</th><th>합계</th><th>승인번호</th><th>상태</th></tr></thead>
+2486 |     <tbody>
+2487 | <% for (HashMap<String, Object> b : billRows) { String st = (String) b.get("ISSUE_STATUS"); %>
+2488 |         <tr><td><%= b.get("BILL_ID") %></td><td><%= esc(b.get("CUST_NM")) %></td><td><%= b.get("BILL_DT") %></td><td class="num"><%= fmtAmt(b.get("TOTAL_AMT")) %></td>
+2489 |             <td><%= esc(b.get("ETAX_NO")) %></td><td><%= "10".equals(st) ? "발행" : "90".equals(st) ? "실패" : "대기" %></td></tr>
+2490 | <% } %>
+2491 |     </tbody>
+2492 | </table>
+2493 | <script type="text/javascript">
+2494 | function fnPick(sel) {
+2495 |     var op = sel.options[sel.selectedIndex], f = document.frmBill;
+2496 |     f.orderId.value = sel.value;
+2497 |     f.custId.value = op.getAttribute('data-cust') || '';
+2498 |     f.contractId.value = op.getAttribute('data-contract') || '';
+2499 |     f.supplyAmt.value = op.getAttribute('data-amt') || '';
+2500 | }
+2501 | function fnIssue() {
+2502 |     var f = document.frmBill;
+2503 |     if (f.orderId.value == '') { alert('수주를 선택하세요.'); return; }
+2504 |     callCmd('billIssue', { custId: f.custId.value, orderId: f.orderId.value, contractId: f.contractId.value, supplyAmt: f.supplyAmt.value }, function(res) {
+2505 |         alert('발행했습니다. 승인번호 ' + res.etaxNo);
+2506 |         goCmd('billList');
+2507 |     });
+2508 | }
+2509 | </script>
+2510 | <%
+2511 |     } else if ("collectList".equals(cmd)) {
+2512 |         // 수금 목록 + 등록 : 거래처를 고르면 그 거래처의 미수 청구를 청구 쪽 cmd 로 읽어 온다
+2513 |         List<HashMap<String, Object>> collectRows = new ArrayList<HashMap<String, Object>>();
+2514 |         List<HashMap<String, Object>> collectCusts = new ArrayList<HashMap<String, Object>>();
+2515 |         Connection conn = null;
+2516 |         try {
+2517 |             conn = getConn();
+2518 |             collectRows = queryList(conn, "SELECT L.COLLECT_ID, L.BILL_ID, L.CUST_ID, C.CUST_NM, L.COLLECT_DT, L.COLLECT_AMT, L.COLLECT_METHOD "
+2519 |                     + "FROM TB_COLLECT L LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = L.CUST_ID ORDER BY L.COLLECT_DT DESC, L.COLLECT_ID DESC LIMIT 100", null);
+2520 |             collectCusts = queryList(conn, "SELECT CUST_ID, CUST_NM FROM TB_CUSTOMER WHERE USE_YN = 'Y' ORDER BY CUST_NM", null);
+2521 |         } catch (Exception e) {
+2522 |             printErr(out, "수금 조회", e);
+2523 |         } finally {
+2524 |             closeAll(null, null, conn);
+2525 |         }
+2526 | %>
+2527 | <h2>수금</h2>
+2528 | <form name="frmCollect" onsubmit="return false;" class="searchbox">
+2529 |     <input type="hidden" name="orderId" value=""/><input type="hidden" name="custId" value=""/>
+2530 |     거래처 <select id="selCust" onchange="fnCustChange(this.value)"><option value="">선택</option>
+2531 | <% for (HashMap<String, Object> cc : collectCusts) { %><option value="<%= cc.get("CUST_ID") %>"><%= esc(cc.get("CUST_NM")) %></option><% } %>
+2532 |     </select>
+2533 |     청구 <select name="billId" onchange="fnBillChange(this)"><option value="">선택</option></select>
+2534 |     수금액 <input type="text" name="collectAmt" size="12" onkeyup="numOnly(this)"/> 방법 <%= codeSelect("collectMethod", "COLLECT_METHOD", "01", null) %>
+2535 |     <button type="button" class="btn btn-main" onclick="fnCollect()">수금 등록</button>
+2536 | </form>
+2537 | <table class="list">
+2538 |     <thead><tr><th>수금번호</th><th>거래처</th><th>청구번호</th><th>수금일</th><th>금액</th><th>방법</th></tr></thead>
+2539 |     <tbody>
+2540 | <% for (HashMap<String, Object> l : collectRows) { %>
+2541 |         <tr><td><%= l.get("COLLECT_ID") %></td><td><%= esc(l.get("CUST_NM")) %></td><td><%= l.get("BILL_ID") %></td><td><%= l.get("COLLECT_DT") %></td>
+2542 |             <td class="num"><%= fmtAmt(l.get("COLLECT_AMT")) %></td><td><%= codeName("COLLECT_METHOD", (String) l.get("COLLECT_METHOD")) %></td></tr>
+2543 | <% } %>
+2544 |     </tbody>
+2545 | </table>
+2546 | <script type="text/javascript">
+2547 | function fnCustChange(custId) {
+2548 |     var f = document.frmCollect;
+2549 |     f.custId.value = custId;
+2550 |     f.billId.length = 1;
+2551 |     if (custId == '') return;
+2552 |     callCmd('billOpenList', { custId: custId }, function(res) {
+2553 |         for (var i = 0; i < res.list.length; i++) {
+2554 |             var op = new Option(res.list[i].billId + ' (남은 금액 ' + fmtNum(res.list[i].balance) + ')', res.list[i].billId);
+2555 |             op.setAttribute('data-order', res.list[i].orderId);
+2556 |             op.setAttribute('data-balance', res.list[i].balance);
+2557 |             f.billId.options[f.billId.length] = op;
+2558 |         }
+2559 |     });
+2560 | }
+2561 | function fnBillChange(sel) {
+2562 |     var op = sel.options[sel.selectedIndex];
+2563 |     document.frmCollect.orderId.value = op.getAttribute('data-order') || '';
+2564 |     document.frmCollect.collectAmt.value = op.getAttribute('data-balance') || '';
+2565 | }
+2566 | function fnCollect() {
+2567 |     var f = document.frmCollect;
+2568 |     if (f.billId.value == '' || f.collectAmt.value == '') { alert('청구와 수금액을 확인하세요.'); return; }
+2569 |     callCmd('collectSave', formToParams(f), function(res) { alert(res.balance <= 0 ? '완납 처리되었습니다.' : '남은 금액 ' + fmtNum(res.balance) + '원'); goCmd('collectList'); });
+2570 | }
+2571 | </script>
+2572 | <%
+2573 |     } else if ("arrearsList".equals(cmd)) {
+2574 |         // 미수 현황 : 발행된 청구 중 아직 다 못 받은 건 (2017.03 화면이라 직접 JDBC.  SQL 은 arrearsData · runArrearsNotice 와 같은 모양)
+2575 |         int iOverdue = toInt(request.getParameter("overdueDays"), 0);
+2576 |         List<HashMap<String, Object>> arrearsRows = new ArrayList<HashMap<String, Object>>();
+2577 |         Connection conn = null;
+2578 |         Statement st = null;
+2579 |         ResultSet rs = null;
+2580 |         try {
+2581 |             conn = getConn();
+2582 |             st = conn.createStatement();
+2583 |             rs = st.executeQuery("SELECT B.BILL_ID, B.CUST_ID, C.CUST_NM, B.BILL_DT, B.TOTAL_AMT, IFNULL(P.PAID_AMT, 0) AS PAID_AMT, "
+2584 |                     + "B.TOTAL_AMT - IFNULL(P.PAID_AMT, 0) AS ARREARS_AMT, DATEDIFF(NOW(), B.BILL_DT) AS OVERDUE_DAYS "
+2585 |                     + "FROM TB_BILL B INNER JOIN TB_CUSTOMER C ON C.CUST_ID = B.CUST_ID "
+2586 |                     + "LEFT OUTER JOIN (SELECT BILL_ID, SUM(COLLECT_AMT) AS PAID_AMT FROM TB_COLLECT GROUP BY BILL_ID) P ON P.BILL_ID = B.BILL_ID "
+2587 |                     + "WHERE B.ISSUE_STATUS = '10' AND B.TOTAL_AMT - IFNULL(P.PAID_AMT, 0) > 0 AND DATEDIFF(NOW(), B.BILL_DT) >= " + iOverdue
+2588 |                     + " ORDER BY OVERDUE_DAYS DESC, B.BILL_ID");
+2589 |             while (rs.next()) {
+2590 |                 HashMap<String, Object> row = new HashMap<String, Object>();
+2591 |                 for (String k : new String[] { "BILL_ID", "CUST_NM", "BILL_DT", "TOTAL_AMT", "PAID_AMT", "ARREARS_AMT", "OVERDUE_DAYS" }) {
+2592 |                     row.put(k, rs.getObject(k));
+2593 |                 }
+2594 |                 arrearsRows.add(row);
+2595 |             }
+2596 |         } catch (Exception e) {
+2597 |             printErr(out, "미수 조회", e);
+2598 |         } finally {
+2599 |             closeAll(rs, st, conn);
+2600 |         }
+2601 | %>
+2602 | <h2>미수 현황</h2>
+2603 | <form method="get" action="<%= thisPage %>" class="searchbox">
+2604 |     <input type="hidden" name="cmd" value="arrearsList"/>
+2605 |     경과일 <input type="text" name="overdueDays" size="4" value="<%= iOverdue %>"/>일 이상 <button type="submit" class="btn btn-main">조회</button>
+2606 | <% if ("ADMIN".equals(authCd)) { %>
+2607 |     <a href="<%= thisPage %>?cmd=batchArrears&key=<%= BATCH_KEY %>" onclick="return confirm('30일 넘은 미수 거래처에 안내 메일을 지금 보냅니다.');">[미수 안내 메일 지금 발송]</a>
+2608 | <% } %>
+2609 | </form>
+2610 | <table class="list">
+2611 |     <thead><tr><th>청구번호</th><th>거래처</th><th>청구일</th><th>청구금액</th><th>수금액</th><th>미수금</th><th>경과일</th></tr></thead>
+2612 |     <tbody>
+2613 | <% for (HashMap<String, Object> a : arrearsRows) { %>
+2614 |         <tr><td><%= a.get("BILL_ID") %></td><td><%= esc(a.get("CUST_NM")) %></td><td><%= a.get("BILL_DT") %></td><td class="num"><%= fmtAmt(a.get("TOTAL_AMT")) %></td>
+2615 |             <td class="num"><%= fmtAmt(a.get("PAID_AMT")) %></td><td class="num warn"><%= fmtAmt(a.get("ARREARS_AMT")) %></td><td><%= a.get("OVERDUE_DAYS") %></td></tr>
+2616 | <% } %>
+2617 |     </tbody>
+2618 | </table>
+2619 | <%
+2620 |     } else if ("salesReport".equals(cmd)) {
+2621 |         // 매출 리포트 : 거래처 · 수주 · 수주품목 · 제품 · 사원 · 청구 · 수금을 한 번에 조인해서 읽고 거래처별로 합산한다 (2021.03 김철수)
+2622 |         List<Object> rptParams = new ArrayList<Object>();
+2623 |         String strRptWhere = salesWhereSql(request, rptParams, authCd, loginId);
+2624 |         List<HashMap<String, Object>> rptRows = new ArrayList<HashMap<String, Object>>();
+2625 |         LinkedHashMap<String, long[]> custSum = new LinkedHashMap<String, long[]>();
+2626 |         Connection conn = null;
+2627 |         try {
+2628 |             conn = getConn();
+2629 |             rptRows = queryList(conn, "SELECT C.CUST_ID, C.CUST_NM, C.CUST_GRADE, U.USER_NM AS CHARGE_USER_NM, O.ORDER_ID, O.ORDER_DT, O.ORDER_STATUS, "
+2630 |                     + "P.PRODUCT_NM, OI.QTY, OI.AMT AS ITEM_AMT, B.TOTAL_AMT AS BILL_AMT, IFNULL(CL.COLLECT_AMT, 0) AS COLLECT_AMT"
+2631 |                     + salesFromSql() + strRptWhere + " ORDER BY O.ORDER_DT DESC, C.CUST_NM, P.PRODUCT_NM LIMIT 500", rptParams.toArray());
+2632 |             for (HashMap<String, Object> r : rptRows) {
+2633 |                 long[] sum = custSum.get((String) r.get("CUST_NM"));
+2634 |                 if (sum == null) { sum = new long[3]; custSum.put((String) r.get("CUST_NM"), sum); }
+2635 |                 sum[0] += ((Number) r.get("ITEM_AMT")).longValue();
+2636 |                 sum[1] += r.get("BILL_AMT") == null ? 0L : ((Number) r.get("BILL_AMT")).longValue();
+2637 |                 sum[2] += ((Number) r.get("COLLECT_AMT")).longValue();
+2638 |             }
+2639 |         } catch (Exception e) {
+2640 |             printErr(out, "리포트 조회", e);
+2641 |         } finally {
+2642 |             closeAll(null, null, conn);
+2643 |         }
+2644 | %>
+2645 | <h2>매출 리포트</h2>
+2646 | <form method="get" action="<%= thisPage %>" class="searchbox">
+2647 |     <input type="hidden" name="cmd" value="salesReport"/>
+2648 |     기간 <input type="text" name="fromDt" size="10" value="<%= esc(request.getParameter("fromDt")) %>"/> ~ <input type="text" name="toDt" size="10" value="<%= esc(request.getParameter("toDt")) %>"/>
+2649 |     <button type="submit" class="btn btn-main">조회</button>
+2650 |     <a href="<%= thisPage %>?cmd=salesExcel&fromDt=<%= esc(request.getParameter("fromDt")) %>&toDt=<%= esc(request.getParameter("toDt")) %>">엑셀</a>
+2651 | </form>
+2652 | <h3>거래처별 합계</h3>
+2653 | <table class="list" style="width:60%">
+2654 |     <thead><tr><th>거래처</th><th>수주 품목 금액</th><th>청구 금액</th><th>수금 금액</th></tr></thead>
+2655 |     <tbody>
+2656 | <% for (Map.Entry<String, long[]> en : custSum.entrySet()) { %>
+2657 |         <tr><td><%= esc(en.getKey()) %></td><td class="num"><%= fmtAmt(en.getValue()[0]) %></td><td class="num"><%= fmtAmt(en.getValue()[1]) %></td><td class="num"><%= fmtAmt(en.getValue()[2]) %></td></tr>
+2658 | <% } %>
+2659 |     </tbody>
+2660 | </table>
+2661 | <%
+2662 |     } else if ("custHist".equals(cmd)) {
+2663 |         // 거래처 변경 이력 (2018.01 추가).  2018.11 에 메뉴에서 뺐다
+2664 |         Connection conn = getConn();
+2665 |         for (HashMap<String, Object> h : getCustHistory(conn, request.getParameter("custId"))) {
+2666 |             out.println(h.get("CHG_DT") + " " + h.get("CHG_COL") + " : " + h.get("OLD_VAL") + " -> " + h.get("NEW_VAL") + "<br/>");
+2667 |         }
+2668 |         closeAll(null, null, conn);
+2669 |     } else {
+2670 | %>
+2671 | <p class="err">알 수 없는 명령입니다 : <%= esc(cmd) %></p>
+2672 | <%
+2673 |     }   // ---- [화면 cmd] 끝
+2674 | %>
+2675 | </div>
+2676 | </body>
+2677 | </html>

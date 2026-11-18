@@ -1,0 +1,261 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 03/10 · 원본 681-940줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+ 681 |     /** 미수 안내 : 30일 넘은 미수가 있는 거래처 대표 담당자에게 메일 (거래처당 1통) */
+ 682 |     private String runArrearsNotice(Connection conn) throws Exception {
+ 683 |         List<HashMap<String, Object>> list = queryList(conn,
+ 684 |             "SELECT B.BILL_ID, B.CUST_ID, C.CUST_NM, B.TOTAL_AMT - IFNULL(P.PAID_AMT, 0) AS ARREARS_AMT, "
+ 685 |           + "DATEDIFF(NOW(), B.BILL_DT) AS OVERDUE_DAYS "
+ 686 |           + "FROM TB_BILL B INNER JOIN TB_CUSTOMER C ON C.CUST_ID = B.CUST_ID "
+ 687 |           + "LEFT OUTER JOIN (SELECT BILL_ID, SUM(COLLECT_AMT) AS PAID_AMT FROM TB_COLLECT GROUP BY BILL_ID) P ON P.BILL_ID = B.BILL_ID "
+ 688 |           + "WHERE B.ISSUE_STATUS = '10' AND B.TOTAL_AMT - IFNULL(P.PAID_AMT, 0) > 0 AND DATEDIFF(NOW(), B.BILL_DT) >= 30 "
+ 689 |           + "ORDER BY OVERDUE_DAYS DESC", null);
+ 690 |         Set<String> noticed = new HashSet<String>();
+ 691 |         int iSent = 0;
+ 692 |         for (HashMap<String, Object> r : list) {
+ 693 |             String strCustId = (String) r.get("CUST_ID");
+ 694 |             if (!noticed.add(strCustId)) continue;          // 거래처당 하루 한 번만
+ 695 |             HashMap<String, Object> contact = queryOne(conn,
+ 696 |                 "SELECT CONTACT_NM, EMAIL FROM TB_CUST_CONTACT WHERE CUST_ID = ? AND EMAIL IS NOT NULL "
+ 697 |               + "ORDER BY MAIN_YN DESC, CONTACT_ID LIMIT 1", new Object[] { strCustId });
+ 698 |             if (contact == null) continue;
+ 699 |             String strBody = contact.get("CONTACT_NM") + " 님,\n\n" + r.get("CUST_NM") + " 의 미수금 "
+ 700 |                            + fmtAmt(r.get("ARREARS_AMT")) + "원이 " + r.get("OVERDUE_DAYS") + "일 경과했습니다. 확인 부탁드립니다.\n";
+ 701 |             if (sendMail((String) contact.get("EMAIL"), "[SMS] 미수금 안내", strBody)) {
+ 702 |                 execUpdate(conn, "UPDATE TB_CUSTOMER SET LAST_NOTICE_DT = NOW() WHERE CUST_ID = ?", new Object[] { strCustId });
+ 703 |                 updateCreditStatus(conn, strCustId, "03");
+ 704 |                 iSent++;
+ 705 |             }
+ 706 |         }
+ 707 |         return "미수 안내 메일 " + iSent + "건";
+ 708 |     }
+ 709 | 
+ 710 |     /** 월마감 : 수금까지 끝난 수주 · 발행 완료된 청구를 마감 처리 (대상 표를 배열로 돌린다) */
+ 711 |     private String runMonthClose(Connection conn, String closeYm) throws SQLException {
+ 712 |         String[] arrTbl  = { "TB_ORDER", "TB_BILL" };
+ 713 |         String[] arrDtCol = { "ORDER_DT", "BILL_DT" };
+ 714 |         String[] arrCond = { "ORDER_STATUS = '수금완료'", "ISSUE_STATUS = '10'" };
+ 715 |         StringBuffer sbRes = new StringBuffer(closeYm + " 마감 :");
+ 716 |         for (int i = 0; i < arrTbl.length; i++) {
+ 717 |             int iCnt = execUpdate(conn, "UPDATE " + arrTbl[i] + " SET CLOSE_YN = 'Y', CLOSE_YM = ?, UPD_DT = NOW() "
+ 718 |                 + "WHERE " + arrCond[i] + " AND CLOSE_YN = 'N' AND DATE_FORMAT(" + arrDtCol[i] + ", '%Y%m') <= ?",
+ 719 |                 new Object[] { closeYm, closeYm });
+ 720 |             sbRes.append(" " + arrTbl[i] + " " + iCnt + "건");
+ 721 |         }
+ 722 |         return sbRes.toString();
+ 723 |     }
+ 724 | 
+ 725 |     /** 유효기한이 지난 견적은 종결(90) 처리 */
+ 726 |     private int expireQuotes(Connection conn) throws SQLException {
+ 727 |         return execUpdate(conn, "UPDATE TB_QUOTE SET STATUS_CD = '90', UPD_DT = NOW() "
+ 728 |                               + "WHERE STATUS_CD IN ('10', '20') AND VALID_DT < CURDATE()", null);
+ 729 |     }
+ 730 | 
+ 731 |     // ---- 2018.01 수주 이력을 따로 쌓던 시절 코드.  TB_ORDER_HIST · TB_CUST_HIST 는 2018.11 에 삭제됨 (지우지는 않았음)
+ 732 |     private void backupOrderToHist(Connection conn, String orderId) throws SQLException {
+ 733 |         execUpdate(conn, "INSERT INTO TB_ORDER_HIST (ORDER_ID, CUST_ID, ORDER_AMT, ORDER_STATUS, HIST_DT) "
+ 734 |                        + "SELECT ORDER_ID, CUST_ID, ORDER_AMT, ORDER_STATUS, NOW() FROM TB_ORDER WHERE ORDER_ID = ?",
+ 735 |                    new Object[] { orderId });
+ 736 |     }
+ 737 | 
+ 738 |     private List<HashMap<String, Object>> getCustHistory(Connection conn, String custId) throws SQLException {
+ 739 |         return queryList(conn, "SELECT CUST_ID, CHG_COL, OLD_VAL, NEW_VAL, CHG_DT FROM TB_CUST_HIST "
+ 740 |                              + "WHERE CUST_ID = ? ORDER BY CHG_DT DESC", new Object[] { custId });
+ 741 |     }
+ 742 | %>
+ 743 | <%
+ 744 |     // ================================================================
+ 745 |     //  공통 처리 : 인코딩 · cmd 결정 · 로그인 검사
+ 746 |     // ================================================================
+ 747 |     request.setCharacterEncoding("UTF-8");
+ 748 |     String cmd = nvl(request.getParameter("cmd"), "main");
+ 749 |     String ctxPath = request.getContextPath();
+ 750 |     String thisPage = ctxPath + "/sales_main.jsp";
+ 751 |     boolean bAjax = "XMLHttpRequest".equals(request.getHeader("X-Requested-With"));
+ 752 | 
+ 753 |     // 로그인 사용자 : 로그인 때 세션에 HashMap 으로 넣어 둔다 (USER_ID, USER_NM, DEPT_ID, DEPT_NM, AUTH_CD, AUTH_NM)
+ 754 |     HashMap loginUser = (HashMap) session.getAttribute("LOGIN_USER");
+ 755 |     String loginId = loginUser == null ? "" : (String) loginUser.get("USER_ID");
+ 756 |     String loginNm = loginUser == null ? "" : (String) loginUser.get("USER_NM");
+ 757 |     String authCd  = loginUser == null ? "" : (String) loginUser.get("AUTH_CD");
+ 758 | 
+ 759 |     // 로그인 없이 부를 수 있는 cmd : 로그인 화면 · 로그인 처리 · 배치(key 로 확인)
+ 760 |     boolean bPublic = "login".equals(cmd) || "doLogin".equals(cmd) || cmd.startsWith("batch");
+ 761 |     if (!bPublic && loginUser == null) {
+ 762 |         if (bAjax) {
+ 763 |             response.setStatus(401);
+ 764 |             printJson(response, out, "{\"ok\":false,\"msg\":\"로그인이 필요합니다.\"}");
+ 765 |         } else {
+ 766 |             response.sendRedirect(thisPage + "?cmd=login");
+ 767 |         }
+ 768 |         return;
+ 769 |     }
+ 770 |     // 관리자만 부를 수 있는 cmd (메뉴에서도 숨기지만 여기서도 막는다)
+ 771 |     if (("codeSave".equals(cmd) || "cacheReload".equals(cmd)) && !"ADMIN".equals(authCd)) {
+ 772 |         printJson(response, out, "{\"ok\":false,\"msg\":\"권한이 없습니다.\"}");
+ 773 |         return;
+ 774 |     }
+ 775 | %>
+ 776 | <%
+ 777 |     // ================================================================
+ 778 |     //  [처리 전용 cmd]  화면 없이 JSON 으로 답하거나 redirect / 다운로드 한다
+ 779 |     //  (화면이 있는 cmd 는 이 아래 [화면 cmd] 분기에 있다)
+ 780 |     // ================================================================
+ 781 |     if ("doLogin".equals(cmd)) {
+ 782 |         // ---------------------------------------------------------- 로그인 처리
+ 783 |         String strUserId = nvl(request.getParameter("userId"), "").trim();
+ 784 |         String strPasswd = nvl(request.getParameter("passwd"), "");
+ 785 |         Connection conn = null;
+ 786 |         try {
+ 787 |             conn = getConn();
+ 788 |             HashMap<String, Object> row = queryOne(conn,
+ 789 |                 "SELECT U.USER_ID, U.USER_NM, U.DEPT_ID, D.DEPT_NM, U.AUTH_CD, A.AUTH_NM, U.EMAIL "
+ 790 |               + "FROM TB_USER U LEFT OUTER JOIN TB_DEPT D ON D.DEPT_ID = U.DEPT_ID "
+ 791 |               + "LEFT OUTER JOIN TB_AUTH A ON A.AUTH_CD = U.AUTH_CD "
+ 792 |               + "WHERE U.USER_ID = ? AND U.PASSWD = SHA2(?, 256) AND U.USE_YN = 'Y'",
+ 793 |                 new Object[] { strUserId, strPasswd });
+ 794 |             if (row == null) {
+ 795 |                 response.sendRedirect(thisPage + "?cmd=login&err=1");
+ 796 |                 return;
+ 797 |             }
+ 798 |             HashMap<String, String> lu = new HashMap<String, String>();
+ 799 |             for (String k : new String[] { "USER_ID", "USER_NM", "DEPT_ID", "DEPT_NM", "AUTH_CD", "AUTH_NM" }) {
+ 800 |                 lu.put(k, (String) row.get(k));
+ 801 |             }
+ 802 |             session.setAttribute("LOGIN_USER", lu);
+ 803 |             session.setMaxInactiveInterval(60 * 60);            // 1시간
+ 804 |             execUpdate(conn, "UPDATE TB_USER SET LAST_LOGIN_DT = NOW() WHERE USER_ID = ?", new Object[] { strUserId });
+ 805 |             response.sendRedirect(thisPage + "?cmd=main");
+ 806 |             return;
+ 807 |         } catch (Exception e) {
+ 808 |             e.printStackTrace();
+ 809 |             response.sendRedirect(thisPage + "?cmd=login&err=2");
+ 810 |             return;
+ 811 |         } finally {
+ 812 |             closeAll(null, null, conn);
+ 813 |         }
+ 814 |     } else if ("logout".equals(cmd)) {
+ 815 |         session.invalidate();
+ 816 |         response.sendRedirect(thisPage + "?cmd=login");
+ 817 |         return;
+ 818 |     } else if ("codeSave".equals(cmd)) {
+ 819 |         // ---------------------------------------------------------- 공통코드 등록 / 수정 (관리자)
+ 820 |         Connection conn = null;
+ 821 |         try {
+ 822 |             conn = getConn();
+ 823 |             execUpdate(conn, "INSERT INTO TB_CODE (GRP_CD, CD, CD_NM, SORT_ORD, USE_YN) VALUES (?, ?, ?, ?, ?) "
+ 824 |                            + "ON DUPLICATE KEY UPDATE CD_NM = VALUES(CD_NM), SORT_ORD = VALUES(SORT_ORD), USE_YN = VALUES(USE_YN)",
+ 825 |                 new Object[] { request.getParameter("grpCd"), request.getParameter("cd"), request.getParameter("cdNm"),
+ 826 |                                toInt(request.getParameter("sortOrd"), 0), nvl(request.getParameter("useYn"), "Y") });
+ 827 |             loadCodeCache(true);        // 이 서버의 캐시만 바로 갱신된다 (WAS 가 2대면 다른 쪽은 10분 뒤)
+ 828 |             printJson(response, out, "{\"ok\":true}");
+ 829 |         } catch (Exception e) {
+ 830 |             printFail(response, out, e);
+ 831 |         } finally {
+ 832 |             closeAll(null, null, conn);
+ 833 |         }
+ 834 |         return;
+ 835 |     } else if ("cacheReload".equals(cmd)) {
+ 836 |         // ---------------------------------------------------------- 공통코드 캐시 갱신 (화면의 [캐시 갱신] 버튼)
+ 837 |         loadCodeCache(true);
+ 838 |         printJson(response, out, "{\"ok\":true}");
+ 839 |         return;
+ 840 |     } else if ("noticeSave".equals(cmd)) {
+ 841 |         // ---------------------------------------------------------- 공지 등록 (관리자 · 팀장)
+ 842 |         if ("USER".equals(authCd)) {
+ 843 |             printJson(response, out, "{\"ok\":false,\"msg\":\"권한이 없습니다.\"}");
+ 844 |             return;
+ 845 |         }
+ 846 |         Connection conn = null;
+ 847 |         try {
+ 848 |             conn = getConn();
+ 849 |             execUpdate(conn, "INSERT INTO TB_NOTICE (TITLE, CONTENT, WRITER_ID, VIEW_CNT, TOP_YN, REG_DT) VALUES (?, ?, ?, 0, ?, NOW())",
+ 850 |                 new Object[] { request.getParameter("title"), request.getParameter("content"), loginId,
+ 851 |                                "Y".equals(request.getParameter("topYn")) ? "Y" : "N" });
+ 852 |             printJson(response, out, "{\"ok\":true}");
+ 853 |         } catch (Exception e) {
+ 854 |             printFail(response, out, e);
+ 855 |         } finally {
+ 856 |             closeAll(null, null, conn);
+ 857 |         }
+ 858 |         return;
+ 859 |     } else if ("masterExport".equals(cmd)) {
+ 860 |         // ---------------------------------------------------------- 기준정보 엑셀 내려받기 (표 이름은 화면에서 받는다)
+ 861 |         //   tbl = CODE / PRODUCT / CUSTOMER / USER ... (TB_ 뒤에 붙는 이름)   2018.05 김철수
+ 862 |         String strTbl = nvl(request.getParameter("tbl"), "CODE").toUpperCase();
+ 863 |         String strOrderBy = nvl(request.getParameter("orderBy"), "1");
+ 864 |         Connection conn = null;
+ 865 |         Statement st = null;
+ 866 |         ResultSet rs = null;
+ 867 |         try {
+ 868 |             conn = getConn();
+ 869 |             st = conn.createStatement();
+ 870 |             rs = st.executeQuery("SELECT * FROM TB_" + strTbl + " ORDER BY " + strOrderBy);
+ 871 |             out.clear();
+ 872 |             response.setContentType("application/vnd.ms-excel; charset=UTF-8");
+ 873 |             response.setHeader("Content-Disposition", "attachment; filename=" + strTbl + "_" + today("yyyyMMdd") + ".xls");
+ 874 |             ResultSetMetaData md = rs.getMetaData();
+ 875 |             out.println("<table border=\"1\"><tr>");
+ 876 |             for (int i = 1; i <= md.getColumnCount(); i++) {
+ 877 |                 out.println("<th>" + md.getColumnLabel(i) + "</th>");
+ 878 |             }
+ 879 |             out.println("</tr>");
+ 880 |             while (rs.next()) {
+ 881 |                 out.print("<tr>");
+ 882 |                 for (int i = 1; i <= md.getColumnCount(); i++) {
+ 883 |                     out.print("<td>" + esc(rs.getString(i)) + "</td>");
+ 884 |                 }
+ 885 |                 out.println("</tr>");
+ 886 |             }
+ 887 |             out.println("</table>");
+ 888 |         } catch (Exception e) {
+ 889 |             out.print("다운로드 중 오류 : " + esc(e.getMessage()));
+ 890 |         } finally {
+ 891 |             closeAll(rs, st, conn);
+ 892 |         }
+ 893 |         return;
+ 894 |     } else if ("custListData".equals(cmd)) {
+ 895 |         // ---------------------------------------------------------- 거래처 목록 (JSON) : 거래처 화면 · 대시보드 · 수주 팝업이 같이 부른다
+ 896 |         int iPageNo = toInt(request.getParameter("pageNo"), 1);
+ 897 |         int iPageSize = toInt(request.getParameter("pageSize"), 20);
+ 898 |         if (iPageSize > 100) iPageSize = 20;                // 100건 넘게 달라고 하면 20 으로 (왜 20 인지 기억 안 남)
+ 899 |         StringBuffer sbWhere = new StringBuffer(" WHERE C.USE_YN = 'Y'");
+ 900 |         List<Object> params = new ArrayList<Object>();
+ 901 |         String strSearchWord = nvl(request.getParameter("searchWord"), "");
+ 902 |         if (strSearchWord.length() > 0) {                   // 거래처명 · 대표자 일부 일치 또는 사업자번호 일치
+ 903 |             sbWhere.append(" AND (C.CUST_NM LIKE CONCAT('%', ?, '%') OR C.CEO_NM LIKE CONCAT('%', ?, '%') OR C.BIZ_NO = ?)");
+ 904 |             params.add(strSearchWord);
+ 905 |             params.add(strSearchWord);
+ 906 |             params.add(strSearchWord);
+ 907 |         }
+ 908 |         if (nvl(request.getParameter("creditStatus"), "").length() > 0) {
+ 909 |             sbWhere.append(" AND C.CREDIT_STATUS = ?");
+ 910 |             params.add(request.getParameter("creditStatus"));
+ 911 |         }
+ 912 |         if ("USER".equals(authCd)) {                        // 영업사원은 본인 담당 거래처만
+ 913 |             sbWhere.append(" AND C.CHARGE_USER_ID = ?");
+ 914 |             params.add(loginId);
+ 915 |         }
+ 916 |         // 정렬 컬럼은 화면에서 받은 값을 그대로 쓴다 (2018.09 김철수 - 대시보드에서 최근 등록순으로 부르려고)
+ 917 |         String strSortCol = nvl(request.getParameter("sortCol"), "C.CUST_NM");
+ 918 |         String strSortDir = "DESC".equals(request.getParameter("sortDir")) ? "DESC" : "ASC";
+ 919 |         Connection conn = null;
+ 920 |         try {
+ 921 |             conn = getConn();
+ 922 |             int iTotal = (int) queryLong(conn, "SELECT COUNT(*) FROM TB_CUSTOMER C" + sbWhere, params.toArray(), 0L);
+ 923 |             params.add((iPageNo - 1) * iPageSize);
+ 924 |             params.add(iPageSize);
+ 925 |             List<HashMap<String, Object>> list = queryList(conn,
+ 926 |                 "SELECT C.CUST_ID, C.CUST_NM, C.BIZ_NO, C.CEO_NM, C.TEL_NO, C.CUST_GRADE, C.CREDIT_STATUS, C.CREDIT_LIMIT, "
+ 927 |               + "C.REG_DT, U.USER_NM AS CHARGE_USER_NM FROM TB_CUSTOMER C "
+ 928 |               + "LEFT OUTER JOIN TB_USER U ON U.USER_ID = C.CHARGE_USER_ID" + sbWhere
+ 929 |               + " ORDER BY " + strSortCol + " " + strSortDir + " LIMIT ?, ?", params.toArray());
+ 930 |             for (HashMap<String, Object> r : list) {            // 코드명은 공통코드 캐시에서
+ 931 |                 r.put("CUST_GRADE_NM", codeName("CUST_GRADE", (String) r.get("CUST_GRADE")));
+ 932 |                 r.put("CREDIT_STATUS_NM", codeName("CREDIT_STATUS", (String) r.get("CREDIT_STATUS")));
+ 933 |             }
+ 934 |             printJson(response, out, "{\"ok\":true,\"totalCnt\":" + iTotal + ",\"list\":" + toJson(list) + "}");
+ 935 |         } catch (Exception e) {
+ 936 |             printFail(response, out, e);
+ 937 |         } finally {
+ 938 |             closeAll(null, null, conn);
+ 939 |         }
+ 940 |         return;

@@ -1,0 +1,253 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 08/10 · 원본 1916-2167줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+1916 |     } else if ("codeList".equals(cmd)) {
+1917 |         // 공통코드 관리 (관리자) : TB_CODE 를 직접 읽는다.  고친 뒤에는 [캐시 갱신]
+1918 |         List<HashMap<String, Object>> codeRows = new ArrayList<HashMap<String, Object>>();
+1919 |         Connection conn = null;
+1920 |         try {
+1921 |             conn = getConn();
+1922 |             codeRows = queryList(conn, "SELECT GRP_CD, CD, CD_NM, SORT_ORD, USE_YN FROM TB_CODE ORDER BY GRP_CD, SORT_ORD, CD", null);
+1923 |         } catch (Exception e) {
+1924 |             printErr(out, "공통코드 조회", e);
+1925 |         } finally {
+1926 |             closeAll(null, null, conn);
+1927 |         }
+1928 | %>
+1929 | <h2>공통코드 관리</h2>
+1930 | <form name="frmCode" onsubmit="return false;" class="searchbox">
+1931 |     그룹 <input type="text" name="grpCd" size="14"/> 코드 <input type="text" name="cd" size="8"/> 코드명 <input type="text" name="cdNm" size="16"/>
+1932 |     순서 <input type="text" name="sortOrd" size="3" value="0"/> 사용 <select name="useYn"><option value="Y">Y</option><option value="N">N</option></select>
+1933 |     <button type="button" class="btn btn-main" onclick="fnCodeSave()">저장</button>
+1934 |     <button type="button" class="btn" onclick="fnReload()">캐시 갱신</button>
+1935 |     <a href="<%= thisPage %>?cmd=masterExport&tbl=CODE&orderBy=GRP_CD,SORT_ORD">엑셀</a>
+1936 | </form>
+1937 | <table class="list">
+1938 |     <thead><tr><th>그룹</th><th>코드</th><th>코드명</th><th>순서</th><th>사용</th></tr></thead>
+1939 |     <tbody>
+1940 | <% for (HashMap<String, Object> c : codeRows) { %>
+1941 |         <tr><td><%= esc(c.get("GRP_CD")) %></td><td><%= esc(c.get("CD")) %></td><td><%= esc(c.get("CD_NM")) %></td><td><%= c.get("SORT_ORD") %></td><td><%= c.get("USE_YN") %></td></tr>
+1942 | <% } %>
+1943 |     </tbody>
+1944 | </table>
+1945 | <script type="text/javascript">
+1946 | function fnCodeSave() {
+1947 |     if (!chkRequired(document.frmCode, ['grpCd:그룹', 'cd:코드', 'cdNm:코드명'])) return;
+1948 |     callCmd('codeSave', formToParams(document.frmCode), function() { goCmd('codeList'); });
+1949 | }
+1950 | function fnReload() { callCmd('cacheReload', {}, function() { alert('캐시를 갱신했습니다. (이 서버만)'); }); }
+1951 | </script>
+1952 | <%
+1953 |     } else if ("custList".equals(cmd)) {
+1954 | %>
+1955 | <h2>거래처 관리</h2>
+1956 | <form id="frmSearch" onsubmit="return false;" class="searchbox">
+1957 |     거래처명 · 대표자 · 사업자번호 <input type="text" name="searchWord" id="searchWord"/>
+1958 |     <%= codeSelect("creditStatus", "CREDIT_STATUS", "", "여신상태 전체") %>
+1959 |     <button type="button" class="btn btn-main" onclick="fnSearch(1)">조회</button>
+1960 |     <button type="button" class="btn" onclick="goCmd('custForm')">신규 등록</button>
+1961 |     <a href="<%= thisPage %>?cmd=masterExport&tbl=CUSTOMER&orderBy=CUST_NM">엑셀</a>
+1962 | </form>
+1963 | <table class="list">
+1964 |     <thead><tr><th>거래처명</th><th>사업자번호</th><th>대표자</th><th>등급</th><th>여신상태</th><th>담당자</th><th>관리</th></tr></thead>
+1965 |     <tbody id="tbodyCust"></tbody>
+1966 | </table>
+1967 | <div class="paging" id="divPaging"></div>
+1968 | <script type="text/javascript">
+1969 | var curPage = 1;
+1970 | window.onload = function() { fnSearch(1); };
+1971 | 
+1972 | function fnSearch(pageNo) {
+1973 |     curPage = pageNo;
+1974 |     var p = formToParams(document.getElementById('frmSearch'));
+1975 |     p.pageNo = pageNo;
+1976 |     p.pageSize = 20;
+1977 |     callCmd('custListData', p, function(res) {
+1978 |         var html = '';
+1979 |         for (var i = 0; i < res.list.length; i++) {
+1980 |             var r = res.list[i];
+1981 |             html += '<tr><td><a href="javascript:goCmd(\'custForm\', \'custId=' + r.custId + '\')">' + r.custNm + '</a></td>';
+1982 |             html += '<td>' + r.bizNo + '</td><td>' + r.ceoNm + '</td><td>' + r.custGradeNm + '</td>';
+1983 |             // 여신상태 03(연체) 이면 빨갛게 - 코드값을 화면에서도 직접 비교한다
+1984 |             html += '<td class="' + (r.creditStatus == '03' ? 'err' : '') + '">' + r.creditStatusNm + '</td><td>' + r.chargeUserNm + '</td>';
+1985 |             html += '<td><a href="javascript:fnDelete(\'' + r.custId + '\')">사용중지</a></td></tr>';
+1986 |         }
+1987 |         document.getElementById('tbodyCust').innerHTML = html;
+1988 |         document.getElementById('divPaging').innerHTML = '총 ' + res.totalCnt + '건';
+1989 |     });
+1990 | }
+1991 | 
+1992 | function fnDelete(custId) {
+1993 |     if (!confirm('사용중지하시겠습니까? (접수 상태 수주와 발행 전 청구도 같이 취소됩니다)')) return;
+1994 |     callCmd('custDelete', { custId: custId }, function(res) {
+1995 |         alert('수주 ' + res.canceledOrder + '건 · 청구 ' + res.canceledBill + '건을 같이 취소했습니다.');
+1996 |         fnSearch(curPage);
+1997 |     });
+1998 | }
+1999 | </script>
+2000 | <%
+2001 |     } else if ("custForm".equals(cmd)) {
+2002 |         // 거래처 등록 / 수정 : custId 가 있으면 수정
+2003 |         String strEditId = nvl(request.getParameter("custId"), "");
+2004 |         HashMap<String, Object> cust = null;
+2005 |         List<HashMap<String, Object>> chargeRows = new ArrayList<HashMap<String, Object>>();
+2006 |         long lCustArrears = 0L;
+2007 |         Connection conn = null;
+2008 |         try {
+2009 |             conn = getConn();
+2010 |             if (strEditId.length() > 0) {
+2011 |                 cust = queryOne(conn, "SELECT CUST_ID, CUST_NM, BIZ_NO, CEO_NM, ADDR, ADDR_DTL, TEL_NO, CUST_GRADE, CREDIT_STATUS, CREDIT_LIMIT, CHARGE_USER_ID, LAST_NOTICE_DT "
+2012 |                         + "FROM TB_CUSTOMER WHERE CUST_ID = ?", new Object[] { strEditId });
+2013 |                 lCustArrears = custArrearsAmt(conn, strEditId);
+2014 |             }
+2015 |             chargeRows = queryList(conn, "SELECT USER_ID, USER_NM FROM TB_USER WHERE USE_YN = 'Y' ORDER BY USER_NM", null);
+2016 |         } catch (Exception e) {
+2017 |             printErr(out, "거래처 조회", e);
+2018 |         } finally {
+2019 |             closeAll(null, null, conn);
+2020 |         }
+2021 |         boolean bEdit = cust != null;
+2022 | %>
+2023 | <h2>거래처 <%= bEdit ? "수정" : "등록" %></h2>
+2024 | <form name="frmCust" onsubmit="return false;">
+2025 |     <input type="hidden" name="custId" value="<%= bEdit ? esc(cust.get("CUST_ID")) : "" %>"/>
+2026 |     <table class="formtbl">
+2027 |         <tr><th>거래처명 *</th><td><input type="text" name="custNm" size="30" value="<%= bEdit ? esc(cust.get("CUST_NM")) : "" %>"/></td>
+2028 |             <th>사업자번호 *</th><td><input type="text" name="bizNo" size="14" maxlength="12" value="<%= bEdit ? esc(cust.get("BIZ_NO")) : "" %>"/></td></tr>
+2029 |         <tr><th>대표자</th><td><input type="text" name="ceoNm" value="<%= bEdit ? esc(cust.get("CEO_NM")) : "" %>"/></td>
+2030 |             <th>전화</th><td><input type="text" name="telNo" value="<%= bEdit ? esc(cust.get("TEL_NO")) : "" %>"/></td></tr>
+2031 |         <tr><th>주소</th><td colspan="3"><input type="text" name="addr" size="50" value="<%= bEdit ? esc(cust.get("ADDR")) : "" %>"/>
+2032 |             <input type="text" name="addrDtl" size="24" value="<%= bEdit ? esc(cust.get("ADDR_DTL")) : "" %>"/></td></tr>
+2033 |         <tr><th>등급</th><td><%= codeSelect("custGrade", "CUST_GRADE", bEdit ? (String) cust.get("CUST_GRADE") : "C", null) %></td>
+2034 |             <th>여신한도(원)</th><td><input type="text" name="creditLimit" size="14" onkeyup="numOnly(this)" value="<%= bEdit && cust.get("CREDIT_LIMIT") != null ? cust.get("CREDIT_LIMIT") : "" %>"/></td></tr>
+2035 |         <tr><th>담당 사원</th><td><select name="chargeUserId">
+2036 | <% for (HashMap<String, Object> u : chargeRows) { %>
+2037 |             <option value="<%= u.get("USER_ID") %>"<%= bEdit && u.get("USER_ID").equals(cust.get("CHARGE_USER_ID")) || !bEdit && u.get("USER_ID").equals(loginId) ? " selected" : "" %>><%= esc(u.get("USER_NM")) %></option>
+2038 | <% } %>
+2039 |         </select></td>
+2040 |             <th>여신상태</th><td><%= bEdit ? codeName("CREDIT_STATUS", (String) cust.get("CREDIT_STATUS")) + " / 현재 미수 " + fmtAmt(lCustArrears) + "원" : "신규(정상)" %></td></tr>
+2041 | <% if (!bEdit) { %>
+2042 |         <tr><th>담당자명</th><td><input type="text" name="contactNm"/></td><th>이메일</th><td><input type="text" name="contactEmail" size="24"/></td></tr>
+2043 |         <tr><th>부서 · 직위</th><td><input type="text" name="contactDept" size="10"/> <input type="text" name="contactPos" size="8"/></td><th>휴대전화</th><td><input type="text" name="contactMobile"/></td></tr>
+2044 | <% } %>
+2045 |     </table>
+2046 |     <p><button type="button" class="btn btn-main" onclick="fnSave()">저장</button> <button type="button" class="btn" onclick="goCmd('custList')">목록</button></p>
+2047 | </form>
+2048 | <script type="text/javascript">
+2049 | function fnSave() {
+2050 |     var f = document.frmCust;
+2051 |     if (!chkRequired(f, ['custNm:거래처명', 'bizNo:사업자번호'])) return;
+2052 |     callCmd('custSave', formToParams(f), function(res) { alert('저장했습니다.'); goCmd('custList'); });
+2053 | }
+2054 | </script>
+2055 | <%
+2056 |     } else if ("prodList".equals(cmd)) {
+2057 |         // 제품 · 기간별 단가 관리 : 제품 목록을 읽고, 단가 입력은 priceSave 로 보낸다
+2058 |         List<HashMap<String, Object>> prodRows = new ArrayList<HashMap<String, Object>>();
+2059 |         Connection conn = null;
+2060 |         try {
+2061 |             conn = getConn();
+2062 |             prodRows = queryList(conn, "SELECT PRODUCT_ID, PRODUCT_NM, PRODUCT_TYPE, UNIT_CD, UNIT_PRICE FROM TB_PRODUCT WHERE USE_YN = 'Y' ORDER BY PRODUCT_NM", null);
+2063 |         } catch (Exception e) {
+2064 |             printErr(out, "제품 조회", e);
+2065 |         } finally {
+2066 |             closeAll(null, null, conn);
+2067 |         }
+2068 | %>
+2069 | <h2>제품 · 단가 관리</h2>
+2070 | <form name="frmProd" onsubmit="return false;" class="searchbox">
+2071 |     <input type="hidden" name="productId" value=""/>
+2072 |     제품명 <input type="text" name="productNm" size="20"/> 유형 <input type="text" name="productType" size="8"/>
+2073 |     단위 <input type="text" name="unitCd" size="4"/> 기본단가 <input type="text" name="unitPrice" size="10" onkeyup="numOnly(this)"/>
+2074 |     <button type="button" class="btn btn-main" onclick="fnProdSave()">저장</button>
+2075 |     <a href="<%= thisPage %>?cmd=masterExport&tbl=PRODUCT&orderBy=PRODUCT_NM">엑셀</a>
+2076 | </form>
+2077 | <table class="list">
+2078 |     <thead><tr><th>제품</th><th>유형</th><th>단위</th><th>기본단가</th><th>선택</th></tr></thead>
+2079 |     <tbody>
+2080 | <% for (HashMap<String, Object> p : prodRows) { %>
+2081 |         <tr><td><%= esc(p.get("PRODUCT_NM")) %></td><td><%= esc(p.get("PRODUCT_TYPE")) %></td><td><%= esc(p.get("UNIT_CD")) %></td>
+2082 |             <td class="num"><%= fmtAmt(p.get("UNIT_PRICE")) %></td>
+2083 |             <td><a href="javascript:fnPick('<%= p.get("PRODUCT_ID") %>', '<%= jq(p.get("PRODUCT_NM")) %>')">단가 입력</a></td></tr>
+2084 | <% } %>
+2085 |     </tbody>
+2086 | </table>
+2087 | <h3>기간별 단가</h3>
+2088 | <form name="frmPrice" onsubmit="return false;" class="searchbox">
+2089 |     <input type="hidden" name="productId" value=""/>
+2090 |     제품 <b id="bPickNm">(위 표에서 선택)</b> 등급 <%= codeSelect("custGrade", "CUST_GRADE", "", "공통") %>
+2091 |     단가 <input type="text" name="unitPrice" size="10" onkeyup="numOnly(this)"/>
+2092 |     적용 <input type="text" name="applyFromDt" size="10" placeholder="yyyy-mm-dd"/> ~ <input type="text" name="applyToDt" size="10" placeholder="yyyy-mm-dd"/>
+2093 |     <button type="button" class="btn btn-main" onclick="fnPriceSave()">추가</button>
+2094 | </form>
+2095 | <script type="text/javascript">
+2096 | function fnPick(id, nm) {
+2097 |     document.frmPrice.productId.value = id;
+2098 |     document.getElementById('bPickNm').innerHTML = nm;
+2099 | }
+2100 | function fnProdSave() {
+2101 |     var f = document.frmProd;
+2102 |     if (!chkRequired(f, ['productNm:제품명', 'unitPrice:기본단가'])) return;
+2103 |     callCmd('prodSave', formToParams(f), function() { goCmd('prodList'); });
+2104 | }
+2105 | function fnPriceSave() {
+2106 |     var f = document.frmPrice;
+2107 |     if (f.productId.value == '') { alert('위 표에서 제품을 먼저 선택하세요.'); return; }
+2108 |     if (!chkDate(f.applyFromDt.value) || !chkDate(f.applyToDt.value)) { alert('적용 기간을 yyyy-mm-dd 로 입력하세요.'); return; }
+2109 |     callCmd('priceSave', formToParams(f), function() { goCmd('prodList'); });
+2110 | }
+2111 | </script>
+2112 | <%
+2113 |     } else if ("opptyList".equals(cmd)) {
+2114 |         // 영업기회 : 거래처 이름은 거래처 표를 조인해서 읽는다 (2016.05 화면 - 조건 값을 SQL 에 바로 붙였다)
+2115 |         List<HashMap<String, Object>> opptyRows = new ArrayList<HashMap<String, Object>>();
+2116 |         List<HashMap<String, Object>> opptyCustRows = new ArrayList<HashMap<String, Object>>();
+2117 |         StringBuffer sbOpptyWhere = new StringBuffer(" WHERE 1 = 1");
+2118 |         if (nvl(request.getParameter("stageCd"), "").length() > 0) {
+2119 |             sbOpptyWhere.append(" AND O.STAGE_CD = '" + request.getParameter("stageCd") + "'");
+2120 |         }
+2121 |         if ("USER".equals(authCd)) {                        // 영업사원은 본인 담당만
+2122 |             sbOpptyWhere.append(" AND O.CHARGE_USER_ID = '" + loginId + "'");
+2123 |         }
+2124 |         Connection conn = null;
+2125 |         try {
+2126 |             conn = getConn();
+2127 |             opptyRows = queryList(conn, "SELECT O.OPPTY_ID, O.CUST_ID, C.CUST_NM, O.OPPTY_NM, O.STAGE_CD, O.EXPECT_AMT, O.EXPECT_CLOSE_DT, O.STATUS_CD "
+2128 |                     + "FROM TB_OPPTY O LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = O.CUST_ID" + sbOpptyWhere + " ORDER BY O.EXPECT_CLOSE_DT, O.OPPTY_ID", null);
+2129 |             opptyCustRows = queryList(conn, "SELECT CUST_ID, CUST_NM FROM TB_CUSTOMER WHERE USE_YN = 'Y' ORDER BY CUST_NM", null);
+2130 |         } catch (Exception e) {
+2131 |             printErr(out, "영업기회 조회", e);
+2132 |         } finally {
+2133 |             closeAll(null, null, conn);
+2134 |         }
+2135 | %>
+2136 | <h2>영업기회</h2>
+2137 | <form name="frmOppty" onsubmit="return false;" class="searchbox">
+2138 |     거래처 <select name="custId"><% for (HashMap<String, Object> oc : opptyCustRows) { %><option value="<%= oc.get("CUST_ID") %>"><%= esc(oc.get("CUST_NM")) %></option><% } %></select>
+2139 |     건명 <input type="text" name="opptyNm" size="24"/> 예상금액 <input type="text" name="expectAmt" size="12" onkeyup="numOnly(this)"/>
+2140 |     예상 종료일 <input type="text" name="expectCloseDt" size="10" placeholder="yyyy-mm-dd"/>
+2141 |     <button type="button" class="btn btn-main" onclick="fnOpptySave()">등록</button>
+2142 | </form>
+2143 | <table class="list">
+2144 |     <thead><tr><th>거래처</th><th>건명</th><th>단계</th><th>예상금액</th><th>예상 종료일</th><th>견적</th></tr></thead>
+2145 |     <tbody>
+2146 | <% for (HashMap<String, Object> o : opptyRows) { %>
+2147 |         <tr><td><%= esc(o.get("CUST_NM")) %></td><td><%= esc(o.get("OPPTY_NM")) %></td>
+2148 |             <td><select onchange="fnStage('<%= o.get("OPPTY_ID") %>', this.value)">
+2149 | <% for (String[] stg : new String[][] { {"10", "발굴"}, {"20", "제안"}, {"30", "협상"}, {"40", "수주"}, {"90", "실주"} }) { %>
+2150 |                 <option value="<%= stg[0] %>"<%= stg[0].equals(o.get("STAGE_CD")) ? " selected" : "" %>><%= stg[1] %></option>
+2151 | <% } %></select></td>
+2152 |             <td class="num"><%= fmtAmt(o.get("EXPECT_AMT")) %></td><td><%= o.get("EXPECT_CLOSE_DT") == null ? "" : o.get("EXPECT_CLOSE_DT") %></td>
+2153 |             <td><a href="javascript:goCmd('quoteForm', 'opptyId=<%= o.get("OPPTY_ID") %>&custId=<%= o.get("CUST_ID") %>')">견적 작성</a></td></tr>
+2154 | <% } %>
+2155 |     </tbody>
+2156 | </table>
+2157 | <script type="text/javascript">
+2158 | function fnOpptySave() {
+2159 |     var f = document.frmOppty;
+2160 |     if (!chkRequired(f, ['opptyNm:건명'])) return;
+2161 |     callCmd('opptySave', formToParams(f), function() { goCmd('opptyList'); });
+2162 | }
+2163 | function fnStage(opptyId, stageCd) {
+2164 |     callCmd('opptyStage', { opptyId: opptyId, stageCd: stageCd }, function() { goCmd('opptyList'); });
+2165 | }
+2166 | </script>
+2167 | <%

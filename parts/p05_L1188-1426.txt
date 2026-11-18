@@ -1,0 +1,240 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 05/10 · 원본 1188-1426줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+1188 |     } else if ("orderListData".equals(cmd)) {
+1189 |         // ---------------------------------------------------------- 수주 목록 (JSON) : 수주 화면 · 대시보드가 같이 부른다
+1190 |         int iPageNo = toInt(request.getParameter("pageNo"), 1);
+1191 |         int iPageSize = toInt(request.getParameter("pageSize"), 20);
+1192 |         if (iPageSize > 100) iPageSize = 20;
+1193 |         StringBuffer sbWhere = new StringBuffer(" WHERE 1 = 1");
+1194 |         List<Object> params = new ArrayList<Object>();
+1195 |         if (nvl(request.getParameter("custId"), "").length() > 0) {
+1196 |             sbWhere.append(" AND O.CUST_ID = ?");
+1197 |             params.add(request.getParameter("custId"));
+1198 |         }
+1199 |         if (nvl(request.getParameter("orderStatus"), "").length() > 0) {
+1200 |             sbWhere.append(" AND O.ORDER_STATUS = ?");
+1201 |             params.add(request.getParameter("orderStatus"));
+1202 |         } else {
+1203 |             sbWhere.append(" AND O.ORDER_STATUS != '취소'");
+1204 |         }
+1205 |         if ("USER".equals(authCd)) {                        // 영업사원은 본인 담당 거래처만
+1206 |             sbWhere.append(" AND C.CHARGE_USER_ID = ?");
+1207 |             params.add(loginId);
+1208 |         }
+1209 |         String strSortCol = nvl(request.getParameter("sortCol"), "O.ORDER_DT");
+1210 |         String strSortDir = "ASC".equals(request.getParameter("sortDir")) ? "ASC" : "DESC";
+1211 |         Connection conn = null;
+1212 |         try {
+1213 |             conn = getConn();
+1214 |             int iTotal = (int) queryLong(conn, "SELECT COUNT(*) FROM TB_ORDER O LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = O.CUST_ID" + sbWhere,
+1215 |                     params.toArray(), 0L);
+1216 |             params.add((iPageNo - 1) * iPageSize);
+1217 |             params.add(iPageSize);
+1218 |             List<HashMap<String, Object>> list = queryList(conn,
+1219 |                 "SELECT O.ORDER_ID, O.QUOTE_ID, O.CUST_ID, C.CUST_NM, O.ORDER_DT, O.ORDER_AMT, O.ORDER_STATUS, O.CONTRACT_ID, O.CLOSE_YN "
+1220 |               + "FROM TB_ORDER O LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = O.CUST_ID" + sbWhere
+1221 |               + " ORDER BY " + strSortCol + " " + strSortDir + " LIMIT ?, ?", params.toArray());
+1222 |             printJson(response, out, "{\"ok\":true,\"totalCnt\":" + iTotal + ",\"list\":" + toJson(list) + "}");
+1223 |         } catch (Exception e) {
+1224 |             printFail(response, out, e);
+1225 |         } finally {
+1226 |             closeAll(null, null, conn);
+1227 |         }
+1228 |         return;
+1229 |     } else if ("orderSave".equals(cmd)) {
+1230 |         // ---------------------------------------------------------- 수주 등록 : 여신 검사 -> 단가 조회 -> TB_ORDER / TB_ORDER_ITEM 저장
+1231 |         String strCustId = request.getParameter("custId");
+1232 |         String strQuoteId = nvl(request.getParameter("quoteId"), "");      // 견적에서 넘어온 경우 hidden 값
+1233 |         String[] arrProduct = request.getParameterValues("productId");
+1234 |         String[] arrQty = request.getParameterValues("qty");
+1235 |         String strOrderDt = today("yyyy-MM-dd");
+1236 |         Connection conn = null;
+1237 |         try {
+1238 |             conn = getConn();
+1239 |             conn.setAutoCommit(false);
+1240 |             // 1. 여신 검사 (2019.08 홍길동) : 거래처 한도 · 상태 · 현재 미수를 직접 읽는다
+1241 |             HashMap<String, Object> cust = queryOne(conn, "SELECT CUST_NM, CREDIT_STATUS, CREDIT_LIMIT FROM TB_CUSTOMER WHERE CUST_ID = ? AND USE_YN = 'Y'",
+1242 |                     new Object[] { strCustId });
+1243 |             if (cust == null) throw new Exception("거래처 정보가 없습니다.");
+1244 |             if ("03".equals(cust.get("CREDIT_STATUS"))) throw new Exception("연체 거래처는 수주를 등록할 수 없습니다.");
+1245 |             if (arrProduct == null || arrProduct.length == 0) throw new Exception("품목을 한 건 이상 입력하세요.");
+1246 |             // 2. 품목 단가는 제품 단가표에서 조회 (기준일 = 수주일)
+1247 |             String strOrderId = genId("OD");
+1248 |             long lOrderAmt = 0L;
+1249 |             long[] arrUnit = new long[arrProduct.length];
+1250 |             for (int i = 0; i < arrProduct.length; i++) {
+1251 |                 arrUnit[i] = getUnitPrice(conn, arrProduct[i], strOrderDt);
+1252 |                 if (arrUnit[i] < 0) throw new Exception("단가가 없는 제품입니다 : " + arrProduct[i]);
+1253 |                 lOrderAmt += arrUnit[i] * toInt(arrQty[i], 1);
+1254 |             }
+1255 |             long lLimit = cust.get("CREDIT_LIMIT") == null ? 0L : ((Number) cust.get("CREDIT_LIMIT")).longValue();
+1256 |             if (lLimit > 0 && custArrearsAmt(conn, strCustId) + lOrderAmt > lLimit) {
+1257 |                 throw new Exception("여신한도를 초과합니다. (한도 " + fmtAmt(lLimit) + "원)");
+1258 |             }
+1259 |             execUpdate(conn, "INSERT INTO TB_ORDER (ORDER_ID, QUOTE_ID, CUST_ID, ORDER_DT, ORDER_AMT, ORDER_STATUS, CLOSE_YN, CHARGE_USER_ID, REG_DT) "
+1260 |                            + "VALUES (?, ?, ?, ?, ?, '접수', 'N', ?, NOW())",
+1261 |                 new Object[] { strOrderId, nvl(strQuoteId, null), strCustId, strOrderDt, lOrderAmt, loginId });
+1262 |             for (int i = 0; i < arrProduct.length; i++) {
+1263 |                 int iQty = toInt(arrQty[i], 1);
+1264 |                 execUpdate(conn, "INSERT INTO TB_ORDER_ITEM (ORDER_ID, ITEM_SEQ, PRODUCT_ID, QTY, UNIT_PRICE, AMT) VALUES (?, ?, ?, ?, ?, ?)",
+1265 |                     new Object[] { strOrderId, i + 1, arrProduct[i], iQty, arrUnit[i], arrUnit[i] * iQty });
+1266 |             }
+1267 |             // 3. 견적에서 만든 수주면 그 견적의 영업기회를 '수주(40)' 로 닫는다 (견적 표에서 영업기회 번호를 읽는다)
+1268 |             if (strQuoteId.length() > 0) {
+1269 |                 HashMap<String, Object> q = queryOne(conn, "SELECT OPPTY_ID FROM TB_QUOTE WHERE QUOTE_ID = ?", new Object[] { strQuoteId });
+1270 |                 if (q != null && q.get("OPPTY_ID") != null) {
+1271 |                     execUpdate(conn, "UPDATE TB_OPPTY SET STAGE_CD = '40', STATUS_CD = '90', UPD_DT = NOW() WHERE OPPTY_ID = ?",
+1272 |                         new Object[] { q.get("OPPTY_ID") });
+1273 |                 }
+1274 |             }
+1275 |             conn.commit();
+1276 |             printJson(response, out, "{\"ok\":true,\"orderId\":\"" + strOrderId + "\",\"orderAmt\":" + lOrderAmt + "}");
+1277 |         } catch (Exception e) {
+1278 |             rollbackQuietly(conn);
+1279 |             printFail(response, out, e);
+1280 |         } finally {
+1281 |             closeAll(null, null, conn);
+1282 |         }
+1283 |         return;
+1284 |     } else if ("orderComplete".equals(cmd)) {
+1285 |         // ---------------------------------------------------------- 수주 완료 : 계약 생성 -> 청구 발행 -> 수주 상태 변경 -> 견적 종결
+1286 |         //   2019.11.05 김철수 고객 요청으로 급히 추가.  전부 한 트랜잭션으로 묶었다 (중간에 실패하면 전부 롤백)
+1287 |         String strOrderId = request.getParameter("orderId");
+1288 |         Connection conn = null;
+1289 |         try {
+1290 |             conn = getConn();
+1291 |             conn.setAutoCommit(false);
+1292 |             HashMap<String, Object> order = queryOne(conn,
+1293 |                 "SELECT O.ORDER_ID, O.QUOTE_ID, O.CUST_ID, O.ORDER_AMT, O.ORDER_STATUS, C.CUST_NM, C.BIZ_NO, C.ADDR "
+1294 |               + "FROM TB_ORDER O INNER JOIN TB_CUSTOMER C ON C.CUST_ID = O.CUST_ID WHERE O.ORDER_ID = ? FOR UPDATE",
+1295 |                 new Object[] { strOrderId });
+1296 |             if (order == null) throw new Exception("수주 정보가 없습니다 : " + strOrderId);
+1297 |             if (!"접수".equals(order.get("ORDER_STATUS"))) throw new Exception("이미 처리된 수주입니다 : " + order.get("ORDER_STATUS"));
+1298 |             String strCustId = (String) order.get("CUST_ID");
+1299 |             long lOrderAmt = ((Number) order.get("ORDER_AMT")).longValue();
+1300 | 
+1301 |             // 1. 계약 생성 (기간 1년) + 수주에 계약번호를 달고 '계약완료' 로
+1302 |             String strContractId = genId("CT");
+1303 |             String strStartDt = today("yyyy-MM-dd");
+1304 |             execUpdate(conn, "INSERT INTO TB_CONTRACT (CONTRACT_ID, ORDER_ID, CUST_ID, CONTRACT_NM, CONTRACT_AMT, START_DT, END_DT, STATUS_CD, REG_DT) "
+1305 |                            + "VALUES (?, ?, ?, ?, ?, ?, ?, '10', NOW())",
+1306 |                 new Object[] { strContractId, strOrderId, strCustId, order.get("CUST_NM") + " 계약", lOrderAmt, strStartDt, addDays(strStartDt, 365) });
+1307 |             execUpdate(conn, "UPDATE TB_ORDER SET CONTRACT_ID = ?, ORDER_STATUS = '계약완료', UPD_DT = NOW() WHERE ORDER_ID = ?",
+1308 |                 new Object[] { strContractId, strOrderId });
+1309 | 
+1310 |             // 2. 청구 발행 + 전자세금계산서 요청 (외부 HTTP 호출이 트랜잭션 안에 있다)
+1311 |             String strBillId = genId("BL");
+1312 |             long lTax = calcVat(lOrderAmt);
+1313 |             execUpdate(conn, "INSERT INTO TB_BILL (BILL_ID, ORDER_ID, CONTRACT_ID, CUST_ID, BILL_DT, SUPPLY_AMT, TAX_AMT, TOTAL_AMT, ISSUE_STATUS, CLOSE_YN, REG_DT) "
+1314 |                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '00', 'N', NOW())",
+1315 |                 new Object[] { strBillId, strOrderId, strContractId, strCustId, strStartDt, lOrderAmt, lTax, lOrderAmt + lTax });
+1316 |             String strEtaxNo = callEtax(strBillId, (String) order.get("BIZ_NO"), (String) order.get("ADDR"), lOrderAmt, lTax);
+1317 |             execUpdate(conn, "UPDATE TB_BILL SET ETAX_NO = ?, ISSUE_STATUS = '10', UPD_DT = NOW() WHERE BILL_ID = ?",
+1318 |                 new Object[] { strEtaxNo, strBillId });
+1319 |             updateCreditStatus(conn, strCustId, "02");                       // 청구가 나가면 거래처 여신상태를 '미수발생(02)' 으로
+1320 | 
+1321 |             // 3. 수주 상태 변경 · 견적 종결
+1322 |             changeOrderStatus(conn, strOrderId, "청구완료");
+1323 |             if (order.get("QUOTE_ID") != null) {
+1324 |                 execUpdate(conn, "UPDATE TB_QUOTE SET STATUS_CD = '90', UPD_DT = NOW() WHERE QUOTE_ID = ?", new Object[] { order.get("QUOTE_ID") });
+1325 |             }
+1326 |             // FIXME: 처리자(loginId) 이력 남기기
+1327 |             conn.commit();
+1328 |             printJson(response, out, "{\"ok\":true,\"contractId\":\"" + strContractId + "\",\"billId\":\"" + strBillId + "\",\"etaxNo\":\"" + jq(strEtaxNo) + "\"}");
+1329 |         } catch (Exception e) {
+1330 |             rollbackQuietly(conn);          // 세금계산서는 이미 나갔어도 DB 만 되돌아간다
+1331 |             printFail(response, out, e);
+1332 |         } finally {
+1333 |             closeAll(null, null, conn);
+1334 |         }
+1335 |         return;
+1336 |     } else if ("contractAmtUpdate".equals(cmd)) {
+1337 |         // ---------------------------------------------------------- 계약 금액 변경 : 계약 금액이 바뀌면 수주 금액도 같이 맞춘다 (2020.09 김철수)
+1338 |         String strContractId = request.getParameter("contractId");
+1339 |         String strOrderId = request.getParameter("orderId");               // 화면의 hidden 값을 그대로 쓴다
+1340 |         long lAmt = toLong(request.getParameter("contractAmt"), -1L);
+1341 |         Connection conn = null;
+1342 |         try {
+1343 |             conn = getConn();
+1344 |             conn.setAutoCommit(false);
+1345 |             if (lAmt < 0) throw new Exception("금액을 확인하세요.");
+1346 |             execUpdate(conn, "UPDATE TB_CONTRACT SET CONTRACT_AMT = ?, UPD_DT = NOW() WHERE CONTRACT_ID = ?", new Object[] { lAmt, strContractId });
+1347 |             execUpdate(conn, "UPDATE TB_ORDER SET ORDER_AMT = ?, UPD_DT = NOW() WHERE ORDER_ID = ?", new Object[] { lAmt, strOrderId });
+1348 |             conn.commit();
+1349 |             printJson(response, out, "{\"ok\":true}");
+1350 |         } catch (Exception e) {
+1351 |             rollbackQuietly(conn);
+1352 |             printFail(response, out, e);
+1353 |         } finally {
+1354 |             closeAll(null, null, conn);
+1355 |         }
+1356 |         return;
+1357 |     } else if ("contractFile".equals(cmd)) {
+1358 |         // ---------------------------------------------------------- 계약서 첨부 업로드 : 요청 본문에 파일 원본을 그대로 실어 보낸다 (화면의 XHR send(file))
+1359 |         String strContractId = request.getParameter("contractId");
+1360 |         String strFileNm = new File(nvl(request.getParameter("fileName"), "contract.dat")).getName();
+1361 |         File dir = new File(UPLOAD_DIR + "/contract");
+1362 |         if (!dir.exists()) dir.mkdirs();
+1363 |         File saveFile = new File(dir, strContractId + "_" + strFileNm);
+1364 |         InputStream is = request.getInputStream();
+1365 |         FileOutputStream fos = new FileOutputStream(saveFile);
+1366 |         byte[] buf = new byte[8192];
+1367 |         int iRead;
+1368 |         long lTotal = 0L;
+1369 |         while ((iRead = is.read(buf)) != -1) {
+1370 |             fos.write(buf, 0, iRead);
+1371 |             lTotal += iRead;
+1372 |         }
+1373 |         fos.close();
+1374 |         printJson(response, out, "{\"ok\":true,\"size\":" + lTotal + ",\"path\":\"" + jq(saveFile.getPath()) + "\"}");
+1375 |         return;
+1376 |     } else if ("billIssue".equals(cmd)) {
+1377 |         // ---------------------------------------------------------- 청구 수기 발행 (수주 완료를 안 거치고 따로 발행할 때) 2016.09 김철수
+1378 |         String strCustId = request.getParameter("custId");                 // 화면의 hidden 값
+1379 |         String strOrderId = request.getParameter("orderId");               // 화면의 hidden 값
+1380 |         String strContractId = nvl(request.getParameter("contractId"), null);
+1381 |         long lSupply = toLong(request.getParameter("supplyAmt"), 0L);
+1382 |         String strBillId = "";
+1383 |         Connection conn = null;
+1384 |         try {
+1385 |             conn = getConn();
+1386 |             // 세금계산서에 들어갈 사업자번호 · 주소는 거래처 표에서 직접 읽는다
+1387 |             HashMap<String, Object> cust = queryOne(conn, "SELECT CUST_NM, BIZ_NO, ADDR FROM TB_CUSTOMER WHERE CUST_ID = ?", new Object[] { strCustId });
+1388 |             if (cust == null) throw new Exception("거래처 정보가 없습니다 : " + strCustId);
+1389 |             strBillId = genId("BL");
+1390 |             long lTax = calcVat(lSupply);
+1391 |             execUpdate(conn, "INSERT INTO TB_BILL (BILL_ID, ORDER_ID, CONTRACT_ID, CUST_ID, BILL_DT, SUPPLY_AMT, TAX_AMT, TOTAL_AMT, ISSUE_STATUS, CLOSE_YN, REG_DT) "
+1392 |                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '00', 'N', NOW())",
+1393 |                 new Object[] { strBillId, strOrderId, strContractId, strCustId, today("yyyy-MM-dd"), lSupply, lTax, lSupply + lTax });
+1394 |             String strEtaxNo = callEtax(strBillId, (String) cust.get("BIZ_NO"), (String) cust.get("ADDR"), lSupply, lTax);
+1395 |             execUpdate(conn, "UPDATE TB_BILL SET ETAX_NO = ?, ISSUE_STATUS = '10', UPD_DT = NOW() WHERE BILL_ID = ?", new Object[] { strEtaxNo, strBillId });
+1396 |             updateCreditStatus(conn, strCustId, "02");
+1397 |             printJson(response, out, "{\"ok\":true,\"billId\":\"" + strBillId + "\",\"etaxNo\":\"" + jq(strEtaxNo) + "\"}");
+1398 |         } catch (Exception e) {
+1399 |             try {
+1400 |                 if (strBillId.length() > 0) {           // 발행 요청이 실패하면 청구를 실패(90)로 표시해 둔다
+1401 |                     execUpdate(conn, "UPDATE TB_BILL SET ISSUE_STATUS = '90', UPD_DT = NOW() WHERE BILL_ID = ?", new Object[] { strBillId });
+1402 |                 }
+1403 |             } catch (Exception e2) { }
+1404 |             printFail(response, out, e);
+1405 |         } finally {
+1406 |             closeAll(null, null, conn);
+1407 |         }
+1408 |         return;
+1409 |     } else if ("billOpenList".equals(cmd)) {
+1410 |         // ---------------------------------------------------------- 거래처의 미수 청구 목록 (JSON) : 수금 화면에서 청구를 고를 때 부른다
+1411 |         Connection conn = null;
+1412 |         try {
+1413 |             conn = getConn();
+1414 |             List<HashMap<String, Object>> list = queryList(conn,
+1415 |                 "SELECT B.BILL_ID, B.ORDER_ID, B.BILL_DT, B.TOTAL_AMT, "
+1416 |               + "B.TOTAL_AMT - IFNULL((SELECT SUM(L.COLLECT_AMT) FROM TB_COLLECT L WHERE L.BILL_ID = B.BILL_ID), 0) AS BALANCE "
+1417 |               + "FROM TB_BILL B WHERE B.CUST_ID = ? AND B.ISSUE_STATUS = '10' "
+1418 |               + "AND B.TOTAL_AMT - IFNULL((SELECT SUM(L.COLLECT_AMT) FROM TB_COLLECT L WHERE L.BILL_ID = B.BILL_ID), 0) > 0 "
+1419 |               + "ORDER BY B.BILL_DT, B.BILL_ID", new Object[] { request.getParameter("custId") });
+1420 |             printJson(response, out, "{\"ok\":true,\"list\":" + toJson(list) + "}");
+1421 |         } catch (Exception e) {
+1422 |             printFail(response, out, e);
+1423 |         } finally {
+1424 |             closeAll(null, null, conn);
+1425 |         }
+1426 |         return;

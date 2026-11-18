@@ -1,0 +1,232 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 09/10 · 원본 2168-2398줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+2168 |     } else if ("quoteList".equals(cmd)) {
+2169 |         // 견적 목록 : 거래처 이름은 거래처 표를 조인해서 읽는다 (2016.06 화면 - 조건 값을 SQL 에 바로 붙였다)
+2170 |         List<HashMap<String, Object>> quoteRows = new ArrayList<HashMap<String, Object>>();
+2171 |         String strQuoteWhere = "USER".equals(authCd) ? " WHERE C.CHARGE_USER_ID = '" + loginId + "'" : "";     // 영업사원은 본인 담당 거래처만
+2172 |         Connection conn = null;
+2173 |         try {
+2174 |             conn = getConn();
+2175 |             quoteRows = queryList(conn, "SELECT Q.QUOTE_ID, Q.CUST_ID, C.CUST_NM, Q.QUOTE_NM, Q.QUOTE_DT, Q.VALID_DT, Q.TOTAL_AMT, Q.STATUS_CD "
+2176 |                     + "FROM TB_QUOTE Q LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = Q.CUST_ID" + strQuoteWhere
+2177 |                     + " ORDER BY Q.QUOTE_DT DESC, Q.QUOTE_ID DESC LIMIT 100", null);
+2178 |         } catch (Exception e) {
+2179 |             printErr(out, "견적 조회", e);
+2180 |         } finally {
+2181 |             closeAll(null, null, conn);
+2182 |         }
+2183 | %>
+2184 | <h2>견적</h2>
+2185 | <p><button type="button" class="btn btn-main" onclick="goCmd('quoteForm')">견적 작성</button></p>
+2186 | <table class="list">
+2187 |     <thead><tr><th>견적번호</th><th>거래처</th><th>견적명</th><th>견적일</th><th>유효기한</th><th>금액</th><th>상태</th><th>관리</th></tr></thead>
+2188 |     <tbody>
+2189 | <% for (HashMap<String, Object> q : quoteRows) { String st = (String) q.get("STATUS_CD"); %>
+2190 |         <tr><td><%= q.get("QUOTE_ID") %></td><td><%= esc(q.get("CUST_NM")) %></td><td><%= esc(q.get("QUOTE_NM")) %></td><td><%= q.get("QUOTE_DT") %></td>
+2191 |             <td><%= q.get("VALID_DT") %></td><td class="num"><%= fmtAmt(q.get("TOTAL_AMT")) %></td>
+2192 |             <td><%= "10".equals(st) ? "작성" : "20".equals(st) ? "제출" : "종결" %></td>
+2193 |             <td><% if ("10".equals(st)) { %><a href="javascript:fnSubmit('<%= q.get("QUOTE_ID") %>')">제출</a><% } %>
+2194 |                 <% if ("20".equals(st)) { %><a href="javascript:goCmd('orderForm', 'quoteId=<%= q.get("QUOTE_ID") %>')">수주 등록</a><% } %></td></tr>
+2195 | <% } %>
+2196 |     </tbody>
+2197 | </table>
+2198 | <script type="text/javascript">
+2199 | function fnSubmit(id) { callCmd('quoteSubmit', { quoteId: id }, function() { goCmd('quoteList'); }); }
+2200 | </script>
+2201 | <%
+2202 |     } else if ("quoteForm".equals(cmd)) {
+2203 |         // 견적 작성 : 영업기회 화면에서 넘어오면 opptyId · custId 가 같이 온다 (아래 hidden 으로 다시 넘긴다)
+2204 |         String strQOpptyId = nvl(request.getParameter("opptyId"), "");
+2205 |         String strQCustId = nvl(request.getParameter("custId"), "");
+2206 |         String strQCustNm = "";
+2207 |         List<HashMap<String, Object>> qProducts = new ArrayList<HashMap<String, Object>>();
+2208 |         Connection conn = null;
+2209 |         try {
+2210 |             conn = getConn();
+2211 |             if (strQCustId.length() > 0) {
+2212 |                 strQCustNm = (String) queryOne(conn, "SELECT CUST_NM FROM TB_CUSTOMER WHERE CUST_ID = ?", new Object[] { strQCustId }).get("CUST_NM");
+2213 |             }
+2214 |             qProducts = queryList(conn, "SELECT PRODUCT_ID, PRODUCT_NM FROM TB_PRODUCT WHERE USE_YN = 'Y' ORDER BY PRODUCT_NM", null);
+2215 |         } catch (Exception e) {
+2216 |             printErr(out, "견적 화면", e);
+2217 |         } finally {
+2218 |             closeAll(null, null, conn);
+2219 |         }
+2220 | %>
+2221 | <h2>견적 작성</h2>
+2222 | <form name="frmQuote" onsubmit="return false;">
+2223 |     <input type="hidden" name="opptyId" value="<%= esc(strQOpptyId) %>"/>
+2224 |     <input type="hidden" name="custId" value="<%= esc(strQCustId) %>"/>
+2225 |     <table class="formtbl">
+2226 |         <tr><th>거래처</th><td><b id="bCustNm"><%= esc(strQCustNm) %></b> <input type="text" id="custWord" size="12"/>
+2227 |             <button type="button" class="btn" onclick="findCust('custWord', 'spCustList', 'pickCust')">거래처 찾기</button> <span id="spCustList"></span></td></tr>
+2228 |         <tr><th>견적명</th><td><input type="text" name="quoteNm" size="40"/></td></tr>
+2229 |     </table>
+2230 |     <h3>품목</h3>
+2231 |     <table class="list" id="tblItem"><thead><tr><th>제품</th><th>수량</th><th>단가</th><th>금액</th></tr></thead><tbody></tbody></table>
+2232 |     <p><button type="button" class="btn" onclick="addItemRow()">품목 추가</button> 합계 <b id="bTotal">0</b>원
+2233 |        <button type="button" class="btn btn-main" onclick="fnSave()">저장</button></p>
+2234 | </form>
+2235 | <script type="text/javascript">
+2236 | var prodOpts = '<% for (HashMap<String, Object> p : qProducts) { %><option value="<%= p.get("PRODUCT_ID") %>"><%= esc(p.get("PRODUCT_NM")) %></option><% } %>';
+2237 | function pickCust(id, nm) {
+2238 |     document.frmQuote.custId.value = id;
+2239 |     document.getElementById('bCustNm').innerHTML = nm;
+2240 |     document.getElementById('spCustList').innerHTML = '';
+2241 | }
+2242 | function fnSave() {
+2243 |     var f = document.frmQuote;
+2244 |     if (f.custId.value == '') { alert('거래처를 선택하세요.'); return; }
+2245 |     if (!chkRequired(f, ['quoteNm:견적명'])) return;
+2246 |     callCmd('quoteSave', formToParams(f), function(res) { alert('견적 ' + res.quoteId + ' 을(를) 저장했습니다.'); goCmd('quoteList'); });
+2247 | }
+2248 | addItemRow();
+2249 | </script>
+2250 | <%
+2251 |     } else if ("orderList".equals(cmd)) {
+2252 | %>
+2253 | <h2>수주</h2>
+2254 | <form id="frmSearch" onsubmit="return false;" class="searchbox">
+2255 |     상태 <select name="orderStatus"><option value="">취소 제외 전체</option><option>접수</option><option>계약완료</option><option>청구완료</option><option>수금완료</option><option>취소</option></select>
+2256 |     <button type="button" class="btn btn-main" onclick="fnSearch(1)">조회</button>
+2257 |     <button type="button" class="btn" onclick="goCmd('orderForm')">수주 등록</button>
+2258 | </form>
+2259 | <table class="list">
+2260 |     <thead><tr><th>수주번호</th><th>거래처</th><th>수주일</th><th>금액</th><th>상태</th><th>마감</th><th>관리</th></tr></thead>
+2261 |     <tbody id="tbodyOrder"></tbody>
+2262 | </table>
+2263 | <div class="paging" id="divPaging"></div>
+2264 | <script type="text/javascript">
+2265 | var curPage = 1;
+2266 | window.onload = function() { fnSearch(1); };
+2267 | 
+2268 | function fnSearch(pageNo) {
+2269 |     curPage = pageNo;
+2270 |     var p = formToParams(document.getElementById('frmSearch'));
+2271 |     p.pageNo = pageNo;
+2272 |     p.pageSize = 20;
+2273 |     callCmd('orderListData', p, function(res) {
+2274 |         var html = '';
+2275 |         for (var i = 0; i < res.list.length; i++) {
+2276 |             var r = res.list[i];
+2277 |             html += '<tr><td><a href="javascript:goCmd(\'orderView\', \'orderId=' + r.orderId + '\')">' + r.orderId + '</a></td><td>' + r.custNm + '</td><td>' + r.orderDt + '</td>';
+2278 |             html += '<td class="num">' + fmtNum(r.orderAmt) + '</td><td>' + r.orderStatus + '</td><td>' + r.closeYn + '</td><td>';
+2279 |             // 접수 상태일 때만 [수주 완료] 를 보여 준다 (상태 문자열을 화면에서도 직접 비교한다)
+2280 |             if (r.orderStatus == '접수') {
+2281 |                 html += '<a href="javascript:fnComplete(\'' + r.orderId + '\')">수주 완료</a>';
+2282 |             }
+2283 |             html += '</td></tr>';
+2284 |         }
+2285 |         document.getElementById('tbodyOrder').innerHTML = html;
+2286 |         document.getElementById('divPaging').innerHTML = '총 ' + res.totalCnt + '건';
+2287 |     });
+2288 | }
+2289 | 
+2290 | function fnComplete(orderId) {
+2291 |     if (!confirm('수주 완료 처리하면 계약과 청구(전자세금계산서)가 바로 만들어집니다. 진행할까요?')) return;
+2292 |     callCmd('orderComplete', { orderId: orderId }, function(res) {
+2293 |         alert('계약 ' + res.contractId + ' / 청구 ' + res.billId + ' 발행 완료');
+2294 |         fnSearch(curPage);
+2295 |     });
+2296 | }
+2297 | </script>
+2298 | <%
+2299 |     } else if ("orderForm".equals(cmd)) {
+2300 |         // 수주 등록 : 견적 화면에서 넘어오면 quoteId 로 견적 · 견적 품목을 직접 읽어 채운다
+2301 |         String strOQuoteId = nvl(request.getParameter("quoteId"), "");
+2302 |         HashMap<String, Object> oQuote = null;
+2303 |         List<HashMap<String, Object>> oQuoteItems = new ArrayList<HashMap<String, Object>>();
+2304 |         List<HashMap<String, Object>> oProducts = new ArrayList<HashMap<String, Object>>();
+2305 |         Connection conn = null;
+2306 |         try {
+2307 |             conn = getConn();
+2308 |             if (strOQuoteId.length() > 0) {
+2309 |                 oQuote = queryOne(conn, "SELECT Q.QUOTE_ID, Q.CUST_ID, C.CUST_NM FROM TB_QUOTE Q INNER JOIN TB_CUSTOMER C ON C.CUST_ID = Q.CUST_ID "
+2310 |                         + "WHERE Q.QUOTE_ID = ?", new Object[] { strOQuoteId });
+2311 |                 oQuoteItems = queryList(conn, "SELECT PRODUCT_ID, QTY FROM TB_QUOTE_ITEM WHERE QUOTE_ID = ? ORDER BY ITEM_SEQ", new Object[] { strOQuoteId });
+2312 |             }
+2313 |             oProducts = queryList(conn, "SELECT PRODUCT_ID, PRODUCT_NM FROM TB_PRODUCT WHERE USE_YN = 'Y' ORDER BY PRODUCT_NM", null);
+2314 |         } catch (Exception e) {
+2315 |             printErr(out, "수주 화면", e);
+2316 |         } finally {
+2317 |             closeAll(null, null, conn);
+2318 |         }
+2319 | %>
+2320 | <h2>수주 등록</h2>
+2321 | <form name="frmOrder" onsubmit="return false;">
+2322 |     <input type="hidden" name="quoteId" value="<%= esc(strOQuoteId) %>"/>
+2323 |     <input type="hidden" name="custId" value="<%= oQuote == null ? "" : esc(oQuote.get("CUST_ID")) %>"/>
+2324 |     <table class="formtbl">
+2325 |         <tr><th>거래처</th><td><b id="bCustNm"><%= oQuote == null ? "" : esc(oQuote.get("CUST_NM")) %></b> <input type="text" id="custWord" size="12"/>
+2326 |             <button type="button" class="btn" onclick="findCust('custWord', 'spCustList', 'pickCust')">거래처 찾기</button> <span id="spCustList"></span></td></tr>
+2327 |         <tr><th>여신</th><td id="tdCredit">거래처를 고르면 여신한도와 미수가 표시됩니다.</td></tr>
+2328 |     </table>
+2329 |     <h3>품목</h3>
+2330 |     <table class="list" id="tblItem"><thead><tr><th>제품</th><th>수량</th><th>단가</th><th>금액</th></tr></thead><tbody></tbody></table>
+2331 |     <p><button type="button" class="btn" onclick="addItemRow()">품목 추가</button> 합계 <b id="bTotal">0</b>원
+2332 |        <button type="button" class="btn btn-main" onclick="fnSave()">저장</button></p>
+2333 | </form>
+2334 | <script type="text/javascript">
+2335 | var prodOpts = '<% for (HashMap<String, Object> p : oProducts) { %><option value="<%= p.get("PRODUCT_ID") %>"><%= esc(p.get("PRODUCT_NM")) %></option><% } %>';
+2336 | 
+2337 | // 거래처를 고르면 여신 정보를 거래처 쪽 cmd 로 읽어 온다
+2338 | function pickCust(id, nm) {
+2339 |     document.frmOrder.custId.value = id;
+2340 |     document.getElementById('bCustNm').innerHTML = nm;
+2341 |     document.getElementById('spCustList').innerHTML = '';
+2342 |     callCmd('custCreditInfo', { custId: id }, function(res) {
+2343 |         document.getElementById('tdCredit').innerHTML = '한도 ' + fmtNum(res.creditLimit) + '원 / 미수 ' + fmtNum(res.arrears) + '원 / 상태 ' + res.creditStatus
+2344 |             + (res.creditStatus == '03' ? ' <span class="err">(연체 - 등록할 수 없음)</span>' : '');
+2345 |     });
+2346 | }
+2347 | function fnSave() {
+2348 |     var f = document.frmOrder;
+2349 |     if (f.custId.value == '') { alert('거래처를 선택하세요.'); return; }
+2350 |     callCmd('orderSave', formToParams(f), function(res) { alert('수주 ' + res.orderId + ' 을(를) 등록했습니다.'); goCmd('orderList'); });
+2351 | }
+2352 | <% for (HashMap<String, Object> qi : oQuoteItems) { %>addItemRow('<%= qi.get("PRODUCT_ID") %>', <%= qi.get("QTY") %>);
+2353 | <% } %><% if (oQuoteItems.isEmpty()) { %>addItemRow();<% } %>
+2354 | </script>
+2355 | <%
+2356 |     } else if ("orderView".equals(cmd)) {
+2357 |         // 수주 상세 : 수주 · 품목 · 계약 · 청구 · 수금을 한 화면에서 전부 읽는다
+2358 |         HashMap<String, Object> vOrder = null, vContract = null;
+2359 |         List<HashMap<String, Object>> vItems = new ArrayList<HashMap<String, Object>>();
+2360 |         List<HashMap<String, Object>> vBills = new ArrayList<HashMap<String, Object>>();
+2361 |         Connection conn = null;
+2362 |         try {
+2363 |             conn = getConn();
+2364 |             Object[] arrId = new Object[] { request.getParameter("orderId") };
+2365 |             vOrder = queryOne(conn, "SELECT O.ORDER_ID, O.CUST_ID, C.CUST_NM, O.ORDER_DT, O.ORDER_AMT, O.ORDER_STATUS, O.CONTRACT_ID "
+2366 |                     + "FROM TB_ORDER O LEFT OUTER JOIN TB_CUSTOMER C ON C.CUST_ID = O.CUST_ID WHERE O.ORDER_ID = ?", arrId);
+2367 |             vItems = queryList(conn, "SELECT I.ITEM_SEQ, P.PRODUCT_NM, I.QTY, I.UNIT_PRICE, I.AMT FROM TB_ORDER_ITEM I "
+2368 |                     + "LEFT OUTER JOIN TB_PRODUCT P ON P.PRODUCT_ID = I.PRODUCT_ID WHERE I.ORDER_ID = ? ORDER BY I.ITEM_SEQ", arrId);
+2369 |             vContract = queryOne(conn, "SELECT CONTRACT_ID, CONTRACT_NM, CONTRACT_AMT, START_DT, END_DT, STATUS_CD FROM TB_CONTRACT WHERE ORDER_ID = ?", arrId);
+2370 |             vBills = queryList(conn, "SELECT B.BILL_ID, B.BILL_DT, B.TOTAL_AMT, B.ETAX_NO, B.ISSUE_STATUS, "
+2371 |                     + "IFNULL((SELECT SUM(L.COLLECT_AMT) FROM TB_COLLECT L WHERE L.BILL_ID = B.BILL_ID), 0) AS PAID_AMT "
+2372 |                     + "FROM TB_BILL B WHERE B.ORDER_ID = ? ORDER BY B.BILL_DT", arrId);
+2373 |         } catch (Exception e) {
+2374 |             printErr(out, "수주 조회", e);
+2375 |         } finally {
+2376 |             closeAll(null, null, conn);
+2377 |         }
+2378 |         if (vOrder != null) {
+2379 | %>
+2380 | <h2>수주 상세 <%= vOrder.get("ORDER_ID") %></h2>
+2381 | <p>거래처 <b><%= esc(vOrder.get("CUST_NM")) %></b> · 수주일 <%= vOrder.get("ORDER_DT") %> · 금액 <%= fmtAmt(vOrder.get("ORDER_AMT")) %>원 · 상태 <b><%= vOrder.get("ORDER_STATUS") %></b></p>
+2382 | <table class="list">
+2383 |     <thead><tr><th>순번</th><th>제품</th><th>수량</th><th>단가</th><th>금액</th></tr></thead>
+2384 |     <tbody>
+2385 | <% for (HashMap<String, Object> it : vItems) { %>
+2386 |         <tr><td><%= it.get("ITEM_SEQ") %></td><td><%= esc(it.get("PRODUCT_NM")) %></td><td><%= it.get("QTY") %></td>
+2387 |             <td class="num"><%= fmtAmt(it.get("UNIT_PRICE")) %></td><td class="num"><%= fmtAmt(it.get("AMT")) %></td></tr>
+2388 | <% } %>
+2389 |     </tbody>
+2390 | </table>
+2391 | <h3>계약</h3>
+2392 | <p><%= vContract == null ? "아직 계약이 없습니다." : esc(vContract.get("CONTRACT_NM")) + " / " + fmtAmt(vContract.get("CONTRACT_AMT")) + "원 / " + vContract.get("START_DT") + " ~ " + vContract.get("END_DT") %></p>
+2393 | <h3>청구 · 수금</h3>
+2394 | <% for (HashMap<String, Object> b : vBills) { %>
+2395 | <p><%= b.get("BILL_ID") %> / <%= b.get("BILL_DT") %> / <%= fmtAmt(b.get("TOTAL_AMT")) %>원 / 승인번호 <%= esc(b.get("ETAX_NO")) %> / 수금 <%= fmtAmt(b.get("PAID_AMT")) %>원</p>
+2396 | <% } %>
+2397 | <p><button type="button" class="btn" onclick="goCmd('orderList')">목록</button></p>
+2398 | <%      }

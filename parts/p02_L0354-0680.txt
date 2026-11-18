@@ -1,0 +1,328 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 02/10 · 원본 354-680줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+ 354 |     /** SELECT 결과를 HashMap(컬럼명 대문자) 목록으로 */
+ 355 |     private List<HashMap<String, Object>> queryList(Connection conn, String sql, Object[] p) throws SQLException {
+ 356 |         PreparedStatement ps = null;
+ 357 |         ResultSet rs = null;
+ 358 |         List<HashMap<String, Object>> list = new ArrayList<HashMap<String, Object>>();
+ 359 |         try {
+ 360 |             ps = conn.prepareStatement(sql);
+ 361 |             bindParams(ps, p);
+ 362 |             rs = ps.executeQuery();
+ 363 |             ResultSetMetaData md = rs.getMetaData();
+ 364 |             int iCols = md.getColumnCount();
+ 365 |             while (rs.next()) {
+ 366 |                 HashMap<String, Object> row = new HashMap<String, Object>();
+ 367 |                 for (int i = 1; i <= iCols; i++) {
+ 368 |                     row.put(md.getColumnLabel(i).toUpperCase(), rs.getObject(i));
+ 369 |                 }
+ 370 |                 list.add(row);
+ 371 |             }
+ 372 |         } finally {
+ 373 |             closeAll(rs, ps, null);
+ 374 |         }
+ 375 |         return list;
+ 376 |     }
+ 377 | 
+ 378 |     private HashMap<String, Object> queryOne(Connection conn, String sql, Object[] p) throws SQLException {
+ 379 |         List<HashMap<String, Object>> list = queryList(conn, sql, p);
+ 380 |         return list.isEmpty() ? null : list.get(0);
+ 381 |     }
+ 382 | 
+ 383 |     private long queryLong(Connection conn, String sql, Object[] p, long def) throws SQLException {
+ 384 |         HashMap<String, Object> row = queryOne(conn, sql, p);
+ 385 |         Object v = row == null ? null : row.values().iterator().next();
+ 386 |         return v == null ? def : ((Number) v).longValue();
+ 387 |     }
+ 388 | 
+ 389 |     private int execUpdate(Connection conn, String sql, Object[] p) throws SQLException {
+ 390 |         PreparedStatement ps = null;
+ 391 |         try {
+ 392 |             ps = conn.prepareStatement(sql);
+ 393 |             bindParams(ps, p);
+ 394 |             return ps.executeUpdate();
+ 395 |         } finally {
+ 396 |             closeAll(null, ps, null);
+ 397 |         }
+ 398 |     }
+ 399 | 
+ 400 |     // ---- 문자열 · 날짜 · 금액 유틸
+ 401 |     private String nvl(String s, String def) {
+ 402 |         return (s == null || s.length() == 0) ? def : s;
+ 403 |     }
+ 404 | 
+ 405 |     private int toInt(String s, int def) {
+ 406 |         try {
+ 407 |             return Integer.parseInt(s.trim().replaceAll(",", ""));
+ 408 |         } catch (Exception e) {
+ 409 |             return def;
+ 410 |         }
+ 411 |     }
+ 412 | 
+ 413 |     private long toLong(String s, long def) {
+ 414 |         try {
+ 415 |             return Long.parseLong(s.trim().replaceAll(",", ""));
+ 416 |         } catch (Exception e) {
+ 417 |             return def;
+ 418 |         }
+ 419 |     }
+ 420 | 
+ 421 |     /** HTML 출력용 이스케이프 */
+ 422 |     private String esc(Object o) {
+ 423 |         if (o == null) return "";
+ 424 |         return o.toString().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;");
+ 425 |     }
+ 426 | 
+ 427 |     /** JSON 문자열용 이스케이프 */
+ 428 |     private String jq(Object o) {
+ 429 |         if (o == null) return "";
+ 430 |         return o.toString().replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "").replace("\n", "\\n");
+ 431 |     }
+ 432 | 
+ 433 |     private String fmtAmt(Object o) {          // 금액 서식 (DB 에서 읽은 BigDecimal · Long 도 그대로 넘긴다)
+ 434 |         return new DecimalFormat("#,##0").format(o == null ? 0L : ((Number) o).longValue());
+ 435 |     }
+ 436 | 
+ 437 |     private String today(String fmt) {
+ 438 |         return new SimpleDateFormat(fmt).format(new java.util.Date());
+ 439 |     }
+ 440 | 
+ 441 |     /** yyyy-MM-dd 기준으로 일수 더하기 */
+ 442 |     private String addDays(String ymd, int days) {
+ 443 |         try {
+ 444 |             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+ 445 |             Calendar cal = Calendar.getInstance();
+ 446 |             cal.setTime(sdf.parse(ymd));
+ 447 |             cal.add(Calendar.DAY_OF_MONTH, days);
+ 448 |             return sdf.format(cal.getTime());
+ 449 |         } catch (ParseException e) {
+ 450 |             throw new IllegalArgumentException("날짜 형식 오류 : " + ymd);
+ 451 |         }
+ 452 |     }
+ 453 | 
+ 454 |     /** 접두어 + 일시 + 일련번호 (예: OD20191105103015007) */
+ 455 |     private synchronized String genId(String prefix) {
+ 456 |         idSeq = (idSeq + 1) % 1000;
+ 457 |         return prefix + today("yyyyMMddHHmmss") + String.format("%03d", idSeq);
+ 458 |     }
+ 459 | 
+ 460 |     /** 공급가액으로 세액 계산 (원 단위 반올림) */
+ 461 |     private long calcVat(long supplyAmt) {
+ 462 |         return Math.round(supplyAmt * VAT_RATE);
+ 463 |     }
+ 464 | 
+ 465 |     /** 조회 결과를 JSON 배열 문자열로 : 컬럼명 CUST_NM -> custNm, 숫자는 그대로 나머지는 문자열 (2019.08 홍길동) */
+ 466 |     private String toJson(List<HashMap<String, Object>> list) {
+ 467 |         StringBuffer sb = new StringBuffer("[");
+ 468 |         for (int i = 0; i < list.size(); i++) {
+ 469 |             sb.append(i > 0 ? ",{" : "{");
+ 470 |             int j = 0;
+ 471 |             for (Map.Entry<String, Object> en : list.get(i).entrySet()) {
+ 472 |                 StringBuffer sbKey = new StringBuffer();
+ 473 |                 boolean bUp = false;
+ 474 |                 for (char ch : en.getKey().toLowerCase().toCharArray()) {
+ 475 |                     if (ch == '_') { bUp = true; continue; }
+ 476 |                     sbKey.append(bUp ? Character.toUpperCase(ch) : ch);
+ 477 |                     bUp = false;
+ 478 |                 }
+ 479 |                 Object v = en.getValue();
+ 480 |                 sb.append((j++ > 0 ? "," : "") + "\"" + sbKey + "\":" + (v instanceof Number ? v.toString() : "\"" + jq(v) + "\""));
+ 481 |             }
+ 482 |             sb.append("}");
+ 483 |         }
+ 484 |         return sb.append("]").toString();
+ 485 |     }
+ 486 | 
+ 487 |     private void printJson(HttpServletResponse res, JspWriter out, String json) throws IOException {
+ 488 |         out.clear();
+ 489 |         res.setContentType("application/json; charset=UTF-8");
+ 490 |         out.print(json);
+ 491 |         out.flush();
+ 492 |     }
+ 493 | 
+ 494 |     /** 처리 cmd 가 실패했을 때 JSON 으로 오류 메시지를 돌려준다 / 화면 cmd 는 화면 위에 빨간 글씨로 */
+ 495 |     private void printFail(HttpServletResponse res, JspWriter out, Exception e) throws IOException {
+ 496 |         printJson(res, out, "{\"ok\":false,\"msg\":\"" + jq(e.getMessage()) + "\"}");
+ 497 |     }
+ 498 | 
+ 499 |     private void printErr(JspWriter out, String what, Exception e) throws IOException {
+ 500 |         out.print("<p class=\"err\">" + what + " 오류 : " + esc(e.getMessage()) + "</p>");
+ 501 |     }
+ 502 | 
+ 503 |     // ---- 공통코드 (TB_CODE) : application 범위에 그룹별로 올려 두고 모든 화면이 같이 쓴다 (2019.08 홍길동)
+ 504 |     private synchronized HashMap<String, List<String[]>> loadCodeCache(boolean force) {
+ 505 |         ServletContext app = getServletContext();
+ 506 |         HashMap<String, List<String[]>> cache = (HashMap<String, List<String[]>>) app.getAttribute(CODE_CACHE);
+ 507 |         Long loadedAt = (Long) app.getAttribute(CODE_CACHE + "_AT");
+ 508 |         // 10분이 지나면 다시 읽는다 (600000 = 10분)
+ 509 |         if (!force && cache != null && loadedAt != null && System.currentTimeMillis() - loadedAt.longValue() < 600000L) {
+ 510 |             return cache;
+ 511 |         }
+ 512 |         Connection conn = null;
+ 513 |         cache = new HashMap<String, List<String[]>>();
+ 514 |         try {
+ 515 |             conn = getConn();
+ 516 |             List<HashMap<String, Object>> rows = queryList(conn,
+ 517 |                 "SELECT GRP_CD, CD, CD_NM FROM TB_CODE WHERE USE_YN = 'Y' ORDER BY GRP_CD, SORT_ORD, CD", null);
+ 518 |             for (HashMap<String, Object> r : rows) {
+ 519 |                 String strGrp = (String) r.get("GRP_CD");
+ 520 |                 if (!cache.containsKey(strGrp)) {
+ 521 |                     cache.put(strGrp, new ArrayList<String[]>());
+ 522 |                 }
+ 523 |                 cache.get(strGrp).add(new String[] { (String) r.get("CD"), (String) r.get("CD_NM") });
+ 524 |             }
+ 525 |             app.setAttribute(CODE_CACHE, cache);
+ 526 |             app.setAttribute(CODE_CACHE + "_AT", Long.valueOf(System.currentTimeMillis()));
+ 527 |         } catch (Exception e) {
+ 528 |             e.printStackTrace();
+ 529 |         } finally {
+ 530 |             closeAll(null, null, conn);
+ 531 |         }
+ 532 |         return cache;
+ 533 |     }
+ 534 | 
+ 535 |     private String codeName(String grpCd, String cd) {
+ 536 |         if (cd == null) return "";
+ 537 |         List<String[]> list = loadCodeCache(false).get(grpCd);
+ 538 |         if (list != null) {
+ 539 |             for (String[] c : list) {
+ 540 |                 if (c[0].equals(cd)) return c[1];
+ 541 |             }
+ 542 |         }
+ 543 |         return cd;
+ 544 |     }
+ 545 | 
+ 546 |     private List<String[]> codeList(String grpCd) {
+ 547 |         List<String[]> list = loadCodeCache(false).get(grpCd);
+ 548 |         return list == null ? new ArrayList<String[]>() : list;
+ 549 |     }
+ 550 | 
+ 551 |     /** 공통코드 드롭다운 HTML */
+ 552 |     private String codeSelect(String name, String grpCd, String sel, String allLabel) {
+ 553 |         StringBuffer sb = new StringBuffer("<select name=\"" + name + "\" id=\"" + name + "\">");
+ 554 |         if (allLabel != null) sb.append("<option value=\"\">" + allLabel + "</option>");
+ 555 |         for (String[] c : codeList(grpCd)) {
+ 556 |             sb.append("<option value=\"" + c[0] + "\"" + (c[0].equals(sel) ? " selected" : "") + ">" + c[1] + "</option>");
+ 557 |         }
+ 558 |         return sb.append("</select>").toString();
+ 559 |     }
+ 560 | 
+ 561 |     // ---- 여러 화면이 같이 부르는 업무 메서드
+ 562 | 
+ 563 |     /** 여신상태 변경 (01 정상 / 02 미수발생 / 03 연체) - 청구 · 수주완료 · 수금 · 배치에서 같이 쓴다 (2019.08 홍길동) */
+ 564 |     private int updateCreditStatus(Connection conn, String custId, String status) throws SQLException {
+ 565 |         return execUpdate(conn, "UPDATE TB_CUSTOMER SET CREDIT_STATUS = ?, UPD_DT = NOW() WHERE CUST_ID = ?",
+ 566 |                 new Object[] { status, custId });
+ 567 |     }
+ 568 | 
+ 569 |     /** 거래처 미수 합계 = 발행된 청구 합계 - 수금 합계 */
+ 570 |     private long custArrearsAmt(Connection conn, String custId) throws SQLException {
+ 571 |         long lBill = queryLong(conn, "SELECT IFNULL(SUM(TOTAL_AMT), 0) FROM TB_BILL WHERE CUST_ID = ? AND ISSUE_STATUS = '10'",
+ 572 |                 new Object[] { custId }, 0L);
+ 573 |         long lPaid = queryLong(conn, "SELECT IFNULL(SUM(COLLECT_AMT), 0) FROM TB_COLLECT WHERE CUST_ID = ?",
+ 574 |                 new Object[] { custId }, 0L);
+ 575 |         return lBill - lPaid;
+ 576 |     }
+ 577 | 
+ 578 |     /** 기준일 단가 : 기간별 단가가 있으면 그것을, 없으면 제품 기본단가 (2020.02 김철수) */
+ 579 |     private long getUnitPrice(Connection conn, String productId, String baseDt) throws SQLException {
+ 580 |         String sql = "SELECT IFNULL((SELECT PP.UNIT_PRICE FROM TB_PRODUCT_PRICE PP "
+ 581 |                    + "WHERE PP.PRODUCT_ID = P.PRODUCT_ID AND ? BETWEEN PP.APPLY_FROM_DT AND PP.APPLY_TO_DT "
+ 582 |                    + "ORDER BY PP.APPLY_FROM_DT DESC LIMIT 1), P.UNIT_PRICE) "
+ 583 |                    + "FROM TB_PRODUCT P WHERE P.PRODUCT_ID = ?";
+ 584 |         return queryLong(conn, sql, new Object[] { baseDt, productId }, -1L);
+ 585 |     }
+ 586 | 
+ 587 |     /** 수주 상태 변경 : 접수 -> 계약완료 -> 청구완료 -> 수금완료 (취소) */
+ 588 |     private int changeOrderStatus(Connection conn, String orderId, String status) throws SQLException {
+ 589 |         return execUpdate(conn, "UPDATE TB_ORDER SET ORDER_STATUS = ?, UPD_DT = NOW() WHERE ORDER_ID = ?",
+ 590 |                 new Object[] { status, orderId });
+ 591 |     }
+ 592 | 
+ 593 |     // ---- 외부 연동
+ 594 | 
+ 595 |     /** 전자세금계산서 서버에 발행 요청 (승인번호 반환).  실패하면 IOException */
+ 596 |     private String callEtax(String billId, String bizNo, String addr, long supplyAmt, long taxAmt) throws IOException {
+ 597 |         HttpURLConnection hc = (HttpURLConnection) new URL(ETAX_URL).openConnection();
+ 598 |         try {
+ 599 |             hc.setRequestMethod("POST");
+ 600 |             hc.setConnectTimeout(5000);
+ 601 |             hc.setReadTimeout(10000);
+ 602 |             hc.setDoOutput(true);
+ 603 |             hc.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+ 604 |             // TODO: JSON 라이브러리로 교체
+ 605 |             String strBody = "{\"billId\":\"" + billId + "\",\"bizNo\":\"" + bizNo + "\",\"addr\":\"" + addr
+ 606 |                            + "\",\"supplyAmt\":" + supplyAmt + ",\"taxAmt\":" + taxAmt + "}";
+ 607 |             OutputStream os = hc.getOutputStream();
+ 608 |             os.write(strBody.getBytes("UTF-8"));
+ 609 |             os.close();
+ 610 |             if (hc.getResponseCode() != 200) {
+ 611 |                 throw new IOException("전자세금계산서 발행 실패 : HTTP " + hc.getResponseCode());
+ 612 |             }
+ 613 |             BufferedReader br = new BufferedReader(new InputStreamReader(hc.getInputStream(), "UTF-8"));
+ 614 |             StringBuffer sb = new StringBuffer();
+ 615 |             String line;
+ 616 |             while ((line = br.readLine()) != null) sb.append(line);
+ 617 |             br.close();
+ 618 |             // 응답 예) {"etaxNo":"20191105-12345678"}
+ 619 |             String strRes = sb.toString();
+ 620 |             int iIdx = strRes.indexOf("\"etaxNo\":\"");
+ 621 |             if (iIdx < 0) throw new IOException("승인번호가 없는 응답 : " + strRes);
+ 622 |             int iStart = iIdx + 10;
+ 623 |             return strRes.substring(iStart, strRes.indexOf("\"", iStart));
+ 624 |         } finally {
+ 625 |             hc.disconnect();
+ 626 |         }
+ 627 |     }
+ 628 | 
+ 629 |     /** 메일 발송 (JavaMail 을 안 넣어서 SMTP 를 직접 쓴다. 인증 없는 사내 릴레이 전용) */
+ 630 |     private boolean sendMail(String to, String subject, String body) {
+ 631 |         Socket sock = null;
+ 632 |         try {
+ 633 |             sock = new Socket(MAIL_HOST, 25);
+ 634 |             sock.setSoTimeout(10000);
+ 635 |             BufferedReader br = new BufferedReader(new InputStreamReader(sock.getInputStream(), "UTF-8"));
+ 636 |             OutputStream os = sock.getOutputStream();
+ 637 |             br.readLine();
+ 638 |             String strSubj = "=?UTF-8?B?" + Base64.getEncoder().encodeToString(subject.getBytes("UTF-8")) + "?=";
+ 639 |             String[] arrCmd = { "HELO sms.example.com", "MAIL FROM:<" + MAIL_FROM + ">", "RCPT TO:<" + to + ">", "DATA",
+ 640 |                                 "From: " + MAIL_FROM + "\r\nTo: " + to + "\r\nSubject: " + strSubj
+ 641 |                               + "\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n.", "QUIT" };
+ 642 |             for (int i = 0; i < arrCmd.length; i++) {
+ 643 |                 os.write((arrCmd[i] + "\r\n").getBytes("UTF-8"));
+ 644 |                 os.flush();
+ 645 |                 br.readLine();
+ 646 |             }
+ 647 |             return true;
+ 648 |         } catch (Exception e) {
+ 649 |             return false;       // 실패해도 배치는 계속 돈다
+ 650 |         } finally {
+ 651 |             try { if (sock != null) sock.close(); } catch (Exception e) { }
+ 652 |         }
+ 653 |     }
+ 654 | 
+ 655 |     // ---- 매출 리포트 SQL 조각 : 화면(salesReport)과 엑셀(salesExcel)이 같이 쓴다 (2021.03 김철수)
+ 656 |     private String salesFromSql() {
+ 657 |         return " FROM TB_CUSTOMER C"
+ 658 |              + " INNER JOIN TB_ORDER O ON O.CUST_ID = C.CUST_ID"
+ 659 |              + " INNER JOIN TB_ORDER_ITEM OI ON OI.ORDER_ID = O.ORDER_ID"
+ 660 |              + " INNER JOIN TB_PRODUCT P ON P.PRODUCT_ID = OI.PRODUCT_ID"
+ 661 |              + " LEFT OUTER JOIN TB_USER U ON U.USER_ID = C.CHARGE_USER_ID"
+ 662 |              + " LEFT OUTER JOIN TB_BILL B ON B.ORDER_ID = O.ORDER_ID"
+ 663 |              + " LEFT OUTER JOIN TB_COLLECT CL ON CL.BILL_ID = B.BILL_ID";
+ 664 |     }
+ 665 | 
+ 666 |     private String salesWhereSql(HttpServletRequest req, List<Object> params, String authCd, String loginId) {
+ 667 |         StringBuffer sb = new StringBuffer(" WHERE O.ORDER_STATUS != '취소'");
+ 668 |         if (nvl(req.getParameter("fromDt"), "").length() > 0) { sb.append(" AND O.ORDER_DT >= ?"); params.add(req.getParameter("fromDt")); }
+ 669 |         if (nvl(req.getParameter("toDt"), "").length() > 0) { sb.append(" AND O.ORDER_DT <= ?"); params.add(req.getParameter("toDt")); }
+ 670 |         if (nvl(req.getParameter("custId"), "").length() > 0) { sb.append(" AND C.CUST_ID = ?"); params.add(req.getParameter("custId")); }
+ 671 |         if (nvl(req.getParameter("productId"), "").length() > 0) { sb.append(" AND P.PRODUCT_ID = ?"); params.add(req.getParameter("productId")); }
+ 672 |         if ("USER".equals(authCd)) {                       // 영업사원은 본인 담당 거래처만
+ 673 |             sb.append(" AND C.CHARGE_USER_ID = ?");
+ 674 |             params.add(loginId);
+ 675 |         }
+ 676 |         return sb.toString();
+ 677 |     }
+ 678 | 
+ 679 |     // ---- 배치에서 부르는 일괄 처리 (batchArrears / batchClose / batchAll 이 같이 쓴다)
+ 680 | 

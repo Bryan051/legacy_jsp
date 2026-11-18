@@ -1,0 +1,248 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 04/10 · 원본 941-1187줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+ 941 |     } else if ("custSave".equals(cmd)) {
+ 942 |         // ---------------------------------------------------------- 거래처 등록 / 수정 (신규일 때는 담당자 1명도 같이)
+ 943 |         String strCustId = nvl(request.getParameter("custId"), "");
+ 944 |         String strCustNm = nvl(request.getParameter("custNm"), "").trim();
+ 945 |         String strBizNo = nvl(request.getParameter("bizNo"), "").replaceAll("-", "");
+ 946 |         long lLimit = toLong(request.getParameter("creditLimit"), 0L);
+ 947 |         Connection conn = null;
+ 948 |         try {
+ 949 |             conn = getConn();
+ 950 |             conn.setAutoCommit(false);
+ 951 |             if (strCustNm.length() == 0) throw new Exception("거래처명을 입력하세요.");
+ 952 |             if (strCustId.length() == 0) {
+ 953 |                 // 신규 : 사업자번호 중복 검사
+ 954 |                 long lDup = queryLong(conn, "SELECT COUNT(*) FROM TB_CUSTOMER WHERE BIZ_NO = ? AND USE_YN = 'Y'",
+ 955 |                         new Object[] { strBizNo }, 0L);
+ 956 |                 if (lDup > 0) throw new Exception("이미 등록된 사업자번호입니다.");
+ 957 |                 strCustId = genId("CU");
+ 958 |                 execUpdate(conn, "INSERT INTO TB_CUSTOMER (CUST_ID, CUST_NM, BIZ_NO, CEO_NM, ADDR, ADDR_DTL, TEL_NO, CUST_GRADE, "
+ 959 |                                + "CREDIT_STATUS, CREDIT_LIMIT, CHARGE_USER_ID, USE_YN, REG_USER_ID, REG_DT) "
+ 960 |                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '01', ?, ?, 'Y', ?, NOW())",
+ 961 |                     new Object[] { strCustId, strCustNm, strBizNo, request.getParameter("ceoNm"), request.getParameter("addr"),
+ 962 |                                    request.getParameter("addrDtl"), request.getParameter("telNo"), nvl(request.getParameter("custGrade"), "C"),
+ 963 |                                    lLimit > 0 ? Long.valueOf(lLimit) : null, nvl(request.getParameter("chargeUserId"), loginId), loginId });
+ 964 |                 if (nvl(request.getParameter("contactNm"), "").length() > 0) {
+ 965 |                     execUpdate(conn, "INSERT INTO TB_CUST_CONTACT (CUST_ID, CONTACT_NM, DEPT_NM, POSITION_NM, EMAIL, MOBILE_NO, MAIN_YN, REG_DT) "
+ 966 |                                    + "VALUES (?, ?, ?, ?, ?, ?, 'Y', NOW())",
+ 967 |                         new Object[] { strCustId, request.getParameter("contactNm"), request.getParameter("contactDept"),
+ 968 |                                        request.getParameter("contactPos"), request.getParameter("contactEmail"), request.getParameter("contactMobile") });
+ 969 |                 }
+ 970 |             } else {
+ 971 |                 // 수정 : 한도를 현재 미수보다 낮게는 못 바꾼다 (청구 · 수금 합계를 직접 읽는다)
+ 972 |                 long lArrears = custArrearsAmt(conn, strCustId);
+ 973 |                 if (lLimit > 0 && lArrears > lLimit) {
+ 974 |                     throw new Exception("현재 미수금(" + fmtAmt(lArrears) + "원)이 여신한도보다 큽니다.");
+ 975 |                 }
+ 976 |                 execUpdate(conn, "UPDATE TB_CUSTOMER SET CUST_NM = ?, BIZ_NO = ?, CEO_NM = ?, ADDR = ?, ADDR_DTL = ?, TEL_NO = ?, "
+ 977 |                                + "CUST_GRADE = ?, CREDIT_LIMIT = ?, CHARGE_USER_ID = ?, UPD_DT = NOW() WHERE CUST_ID = ?",
+ 978 |                     new Object[] { strCustNm, strBizNo, request.getParameter("ceoNm"), request.getParameter("addr"),
+ 979 |                                    request.getParameter("addrDtl"), request.getParameter("telNo"), nvl(request.getParameter("custGrade"), "C"),
+ 980 |                                    lLimit > 0 ? Long.valueOf(lLimit) : null, nvl(request.getParameter("chargeUserId"), loginId), strCustId });
+ 981 |             }
+ 982 |             conn.commit();
+ 983 |             printJson(response, out, "{\"ok\":true,\"custId\":\"" + strCustId + "\"}");
+ 984 |         } catch (Exception e) {
+ 985 |             rollbackQuietly(conn);
+ 986 |             printFail(response, out, e);
+ 987 |         } finally {
+ 988 |             closeAll(null, null, conn);
+ 989 |         }
+ 990 |         return;
+ 991 |     } else if ("custDelete".equals(cmd)) {
+ 992 |         // ---------------------------------------------------------- 거래처 사용중지 (삭제는 USE_YN = 'N' 으로만)
+ 993 |         String strCustId = request.getParameter("custId");
+ 994 |         Connection conn = null;
+ 995 |         try {
+ 996 |             conn = getConn();
+ 997 |             conn.setAutoCommit(false);
+ 998 |             if (custArrearsAmt(conn, strCustId) > 0) {          // 미수가 남아 있으면 못 끊는다
+ 999 |                 throw new Exception("미수금이 남아 있는 거래처는 사용중지할 수 없습니다.");
+1000 |             }
+1001 |             execUpdate(conn, "UPDATE TB_CUSTOMER SET USE_YN = 'N', UPD_DT = NOW() WHERE CUST_ID = ?", new Object[] { strCustId });
+1002 |             // 접수 상태 수주는 같이 취소한다 (2020.06 영업팀 요청)
+1003 |             int iOrder = execUpdate(conn, "UPDATE TB_ORDER SET ORDER_STATUS = '취소', UPD_DT = NOW() WHERE CUST_ID = ? AND ORDER_STATUS = '접수'",
+1004 |                     new Object[] { strCustId });
+1005 |             // 아직 발행 전인 청구(00)는 실패(90)로 돌려 놓는다
+1006 |             int iBill = execUpdate(conn, "UPDATE TB_BILL SET ISSUE_STATUS = '90', UPD_DT = NOW() WHERE CUST_ID = ? AND ISSUE_STATUS = '00'",
+1007 |                     new Object[] { strCustId });
+1008 |             conn.commit();
+1009 |             printJson(response, out, "{\"ok\":true,\"canceledOrder\":" + iOrder + ",\"canceledBill\":" + iBill + "}");
+1010 |         } catch (Exception e) {
+1011 |             rollbackQuietly(conn);
+1012 |             printFail(response, out, e);
+1013 |         } finally {
+1014 |             closeAll(null, null, conn);
+1015 |         }
+1016 |         return;
+1017 |     } else if ("custCreditInfo".equals(cmd)) {
+1018 |         // ---------------------------------------------------------- 거래처 여신 정보 (JSON) : 수주 등록 화면에서 부른다
+1019 |         Connection conn = null;
+1020 |         try {
+1021 |             conn = getConn();
+1022 |             HashMap<String, Object> cust = queryOne(conn, "SELECT CUST_NM, BIZ_NO, CREDIT_STATUS, CREDIT_LIMIT FROM TB_CUSTOMER WHERE CUST_ID = ?",
+1023 |                     new Object[] { request.getParameter("custId") });
+1024 |             if (cust == null) throw new Exception("거래처 정보가 없습니다.");
+1025 |             long lArrears = custArrearsAmt(conn, request.getParameter("custId"));
+1026 |             printJson(response, out, "{\"ok\":true,\"custNm\":\"" + jq(cust.get("CUST_NM")) + "\",\"creditStatus\":\"" + jq(cust.get("CREDIT_STATUS"))
+1027 |                     + "\",\"creditLimit\":" + (cust.get("CREDIT_LIMIT") == null ? 0 : ((Number) cust.get("CREDIT_LIMIT")).longValue())
+1028 |                     + ",\"arrears\":" + lArrears + "}");
+1029 |         } catch (Exception e) {
+1030 |             printFail(response, out, e);
+1031 |         } finally {
+1032 |             closeAll(null, null, conn);
+1033 |         }
+1034 |         return;
+1035 |     } else if ("prodSave".equals(cmd)) {
+1036 |         // ---------------------------------------------------------- 제품 등록 / 수정
+1037 |         String strProductId = nvl(request.getParameter("productId"), "");
+1038 |         long lUnitPrice = toLong(request.getParameter("unitPrice"), -1L);
+1039 |         Connection conn = null;
+1040 |         try {
+1041 |             conn = getConn();
+1042 |             if (nvl(request.getParameter("productNm"), "").length() == 0 || lUnitPrice < 0) {
+1043 |                 throw new Exception("제품명과 기본단가를 확인하세요.");
+1044 |             }
+1045 |             if (strProductId.length() == 0) {
+1046 |                 strProductId = genId("PR");
+1047 |                 execUpdate(conn, "INSERT INTO TB_PRODUCT (PRODUCT_ID, PRODUCT_NM, PRODUCT_TYPE, UNIT_CD, UNIT_PRICE, USE_YN, REG_DT) "
+1048 |                                + "VALUES (?, ?, ?, ?, ?, 'Y', NOW())",
+1049 |                     new Object[] { strProductId, request.getParameter("productNm"), request.getParameter("productType"),
+1050 |                                    request.getParameter("unitCd"), lUnitPrice });
+1051 |             } else {
+1052 |                 execUpdate(conn, "UPDATE TB_PRODUCT SET PRODUCT_NM = ?, PRODUCT_TYPE = ?, UNIT_CD = ?, UNIT_PRICE = ?, UPD_DT = NOW() "
+1053 |                                + "WHERE PRODUCT_ID = ?",
+1054 |                     new Object[] { request.getParameter("productNm"), request.getParameter("productType"),
+1055 |                                    request.getParameter("unitCd"), lUnitPrice, strProductId });
+1056 |             }
+1057 |             printJson(response, out, "{\"ok\":true,\"productId\":\"" + strProductId + "\"}");
+1058 |         } catch (Exception e) {
+1059 |             printFail(response, out, e);
+1060 |         } finally {
+1061 |             closeAll(null, null, conn);
+1062 |         }
+1063 |         return;
+1064 |     } else if ("priceSave".equals(cmd)) {
+1065 |         // ---------------------------------------------------------- 기간별 단가 등록 (적용 기간이 겹치면 거부) 2020.02 김철수
+1066 |         Connection conn = null;
+1067 |         try {
+1068 |             conn = getConn();
+1069 |             String strFrom = request.getParameter("applyFromDt");
+1070 |             String strTo = request.getParameter("applyToDt");
+1071 |             long lDup = queryLong(conn, "SELECT COUNT(*) FROM TB_PRODUCT_PRICE WHERE PRODUCT_ID = ? AND ? <= APPLY_TO_DT AND ? >= APPLY_FROM_DT",
+1072 |                     new Object[] { request.getParameter("productId"), strFrom, strTo }, 0L);
+1073 |             if (lDup > 0) throw new Exception("적용 기간이 겹치는 단가가 있습니다.");
+1074 |             execUpdate(conn, "INSERT INTO TB_PRODUCT_PRICE (PRODUCT_ID, CUST_GRADE, UNIT_PRICE, APPLY_FROM_DT, APPLY_TO_DT) VALUES (?, ?, ?, ?, ?)",
+1075 |                 new Object[] { request.getParameter("productId"), nvl(request.getParameter("custGrade"), null),
+1076 |                                toLong(request.getParameter("unitPrice"), 0L), strFrom, strTo });
+1077 |             printJson(response, out, "{\"ok\":true}");
+1078 |         } catch (Exception e) {
+1079 |             printFail(response, out, e);
+1080 |         } finally {
+1081 |             closeAll(null, null, conn);
+1082 |         }
+1083 |         return;
+1084 |     } else if ("priceInfo".equals(cmd)) {
+1085 |         // ---------------------------------------------------------- 기준일 단가 조회 (JSON) : 견적 · 수주 화면의 품목 입력에서 부른다
+1086 |         Connection conn = null;
+1087 |         try {
+1088 |             conn = getConn();
+1089 |             long lPrice = getUnitPrice(conn, request.getParameter("productId"), nvl(request.getParameter("baseDt"), today("yyyy-MM-dd")));
+1090 |             printJson(response, out, "{\"ok\":" + (lPrice >= 0) + ",\"unitPrice\":" + lPrice + ",\"msg\":\"단가가 없는 제품입니다.\"}");
+1091 |         } catch (Exception e) {
+1092 |             printFail(response, out, e);
+1093 |         } finally {
+1094 |             closeAll(null, null, conn);
+1095 |         }
+1096 |         return;
+1097 |     } else if ("opptySave".equals(cmd)) {
+1098 |         // ---------------------------------------------------------- 영업기회 등록 (거래처 존재 여부는 거래처 표를 직접 확인)
+1099 |         Connection conn = null;
+1100 |         try {
+1101 |             conn = getConn();
+1102 |             long lCust = queryLong(conn, "SELECT COUNT(*) FROM TB_CUSTOMER WHERE CUST_ID = ? AND USE_YN = 'Y'",
+1103 |                     new Object[] { request.getParameter("custId") }, 0L);
+1104 |             if (lCust == 0) throw new Exception("거래처를 선택하세요.");
+1105 |             String strOpptyId = genId("OP");
+1106 |             execUpdate(conn, "INSERT INTO TB_OPPTY (OPPTY_ID, CUST_ID, OPPTY_NM, STAGE_CD, EXPECT_AMT, EXPECT_CLOSE_DT, CHARGE_USER_ID, STATUS_CD, REG_DT) "
+1107 |                            + "VALUES (?, ?, ?, '10', ?, ?, ?, '10', NOW())",
+1108 |                 new Object[] { strOpptyId, request.getParameter("custId"), request.getParameter("opptyNm"),
+1109 |                                toLong(request.getParameter("expectAmt"), 0L), nvl(request.getParameter("expectCloseDt"), null), loginId });
+1110 |             printJson(response, out, "{\"ok\":true,\"opptyId\":\"" + strOpptyId + "\"}");
+1111 |         } catch (Exception e) {
+1112 |             printFail(response, out, e);
+1113 |         } finally {
+1114 |             closeAll(null, null, conn);
+1115 |         }
+1116 |         return;
+1117 |     } else if ("opptyStage".equals(cmd)) {
+1118 |         // ---------------------------------------------------------- 영업기회 단계 변경 : 10 발굴 / 20 제안 / 30 협상 / 40 수주 / 90 실주
+1119 |         String strStage = request.getParameter("stageCd");
+1120 |         Connection conn = null;
+1121 |         try {
+1122 |             conn = getConn();
+1123 |             execUpdate(conn, "UPDATE TB_OPPTY SET STAGE_CD = ?, STATUS_CD = CASE WHEN ? IN ('40', '90') THEN '90' ELSE '10' END, UPD_DT = NOW() "
+1124 |                            + "WHERE OPPTY_ID = ?", new Object[] { strStage, strStage, request.getParameter("opptyId") });
+1125 |             printJson(response, out, "{\"ok\":true}");
+1126 |         } catch (Exception e) {
+1127 |             printFail(response, out, e);
+1128 |         } finally {
+1129 |             closeAll(null, null, conn);
+1130 |         }
+1131 |         return;
+1132 |     } else if ("quoteSave".equals(cmd)) {
+1133 |         // ---------------------------------------------------------- 견적 등록 : 품목 단가는 단가표에서 조회해서 채운다
+1134 |         String[] arrProduct = request.getParameterValues("productId");
+1135 |         String[] arrQty = request.getParameterValues("qty");
+1136 |         String strOpptyId = nvl(request.getParameter("opptyId"), "");      // 영업기회 화면에서 넘어온 hidden 값
+1137 |         String strQuoteDt = today("yyyy-MM-dd");
+1138 |         Connection conn = null;
+1139 |         try {
+1140 |             conn = getConn();
+1141 |             conn.setAutoCommit(false);
+1142 |             if (arrProduct == null || arrProduct.length == 0) throw new Exception("품목을 한 건 이상 입력하세요.");
+1143 |             String strQuoteId = genId("QT");
+1144 |             long lTotal = 0L;
+1145 |             long[] arrUnit = new long[arrProduct.length];
+1146 |             for (int i = 0; i < arrProduct.length; i++) {
+1147 |                 arrUnit[i] = getUnitPrice(conn, arrProduct[i], strQuoteDt);
+1148 |                 if (arrUnit[i] < 0) throw new Exception("단가가 없는 제품입니다 : " + arrProduct[i]);
+1149 |                 lTotal += arrUnit[i] * toInt(arrQty[i], 1);
+1150 |             }
+1151 |             execUpdate(conn, "INSERT INTO TB_QUOTE (QUOTE_ID, OPPTY_ID, CUST_ID, QUOTE_NM, QUOTE_DT, VALID_DT, TOTAL_AMT, STATUS_CD, CHARGE_USER_ID, REG_DT) "
+1152 |                            + "VALUES (?, ?, ?, ?, ?, ?, ?, '10', ?, NOW())",
+1153 |                 new Object[] { strQuoteId, nvl(strOpptyId, null), request.getParameter("custId"), request.getParameter("quoteNm"),
+1154 |                                strQuoteDt, addDays(strQuoteDt, 30), lTotal, loginId });
+1155 |             for (int i = 0; i < arrProduct.length; i++) {
+1156 |                 int iQty = toInt(arrQty[i], 1);
+1157 |                 execUpdate(conn, "INSERT INTO TB_QUOTE_ITEM (QUOTE_ID, ITEM_SEQ, PRODUCT_ID, QTY, UNIT_PRICE, AMT) VALUES (?, ?, ?, ?, ?, ?)",
+1158 |                     new Object[] { strQuoteId, i + 1, arrProduct[i], iQty, arrUnit[i], arrUnit[i] * iQty });
+1159 |             }
+1160 |             // 영업기회에서 만든 견적이면 영업기회 단계를 '제안(20)' 으로 올린다
+1161 |             if (strOpptyId.length() > 0) {
+1162 |                 execUpdate(conn, "UPDATE TB_OPPTY SET STAGE_CD = '20', UPD_DT = NOW() WHERE OPPTY_ID = ? AND STAGE_CD = '10'",
+1163 |                     new Object[] { strOpptyId });
+1164 |             }
+1165 |             conn.commit();
+1166 |             printJson(response, out, "{\"ok\":true,\"quoteId\":\"" + strQuoteId + "\",\"totalAmt\":" + lTotal + "}");
+1167 |         } catch (Exception e) {
+1168 |             rollbackQuietly(conn);
+1169 |             printFail(response, out, e);
+1170 |         } finally {
+1171 |             closeAll(null, null, conn);
+1172 |         }
+1173 |         return;
+1174 |     } else if ("quoteSubmit".equals(cmd)) {
+1175 |         // ---------------------------------------------------------- 견적 제출 (작성 10 -> 제출 20)
+1176 |         Connection conn = null;
+1177 |         try {
+1178 |             conn = getConn();
+1179 |             int iCnt = execUpdate(conn, "UPDATE TB_QUOTE SET STATUS_CD = '20', UPD_DT = NOW() WHERE QUOTE_ID = ? AND STATUS_CD = '10'",
+1180 |                     new Object[] { request.getParameter("quoteId") });
+1181 |             printJson(response, out, "{\"ok\":" + (iCnt > 0) + ",\"msg\":\"이미 제출했거나 종결된 견적입니다.\"}");
+1182 |         } catch (Exception e) {
+1183 |             printFail(response, out, e);
+1184 |         } finally {
+1185 |             closeAll(null, null, conn);
+1186 |         }
+1187 |         return;

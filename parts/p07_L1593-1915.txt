@@ -1,0 +1,324 @@
+[sales_main.jsp 읽기용 구간 사본 · 구간 07/10 · 원본 1593-1915줄 · 줄 앞 숫자와 | 는 원본 줄 번호이며 코드가 아니다]
+1593 | <!DOCTYPE html>
+1594 | <html>
+1595 | <head>
+1596 | <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+1597 | <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+1598 | <title>SMS 영업관리시스템</title>
+1599 | <style type="text/css">
+1600 | body { font-family: "맑은 고딕", Dotum, sans-serif; font-size: 12px; color: #333; margin: 0; background: #f4f5f7; }
+1601 | #topbar { background: #2c3e50; padding: 8px 14px; color: #fff; }
+1602 | #topbar a { color: #ecf0f1; margin-right: 10px; text-decoration: none; }
+1603 | #topbar .logo { font-weight: bold; margin-right: 20px; }
+1604 | #topbar .who { float: right; }
+1605 | #wrap { padding: 14px 18px; }
+1606 | h2 { font-size: 16px; margin: 4px 0 10px 0; }
+1607 | h3 { font-size: 13px; margin: 14px 0 6px 0; }
+1608 | table.list { border-collapse: collapse; width: 100%; background: #fff; }
+1609 | table.list th { background: #e9ecef; border: 1px solid #ccc; padding: 5px; }
+1610 | table.list td { border: 1px solid #ddd; padding: 4px 6px; }
+1611 | table.list td.num { text-align: right; }
+1612 | .searchbox { background: #fff; border: 1px solid #ddd; padding: 8px; margin-bottom: 8px; }
+1613 | .formtbl { border-collapse: collapse; background: #fff; }
+1614 | .formtbl th { background: #f1f3f5; border: 1px solid #ccc; padding: 5px 10px; text-align: left; }
+1615 | .formtbl td { border: 1px solid #ddd; padding: 4px 8px; }
+1616 | .btn { padding: 3px 10px; border: 1px solid #999; background: #f8f8f8; cursor: pointer; }
+1617 | .btn-main { background: #2980b9; color: #fff; border-color: #2471a3; }
+1618 | .err { color: #c0392b; }
+1619 | .warn { color: #d35400; font-weight: bold; }
+1620 | .cards div { display: inline-block; width: 22%; background: #fff; border: 1px solid #ddd; padding: 10px; margin-right: 1%; }
+1621 | .cards b { display: block; font-size: 18px; margin-top: 4px; }
+1622 | .loginbox { width: 320px; margin: 90px auto; background: #fff; padding: 24px; border: 1px solid #ccc; }
+1623 | .paging { text-align: center; margin: 10px 0; }
+1624 | </style>
+1625 | <script type="text/javascript">
+1626 | var thisPage = '<%= thisPage %>';
+1627 | var authCd = '<%= esc(authCd) %>';
+1628 | 
+1629 | // 같은 JSP 의 cmd 를 부르는 공통 함수 (2016.03 홍길동).  답은 JSON ({ok:true/false, msg:...})
+1630 | function callCmd(cmd, params, onOk, onFail) {
+1631 |     var xhr = new XMLHttpRequest();
+1632 |     var body = 'cmd=' + encodeURIComponent(cmd);
+1633 |     for (var k in params) {
+1634 |         if (params[k] === undefined || params[k] === null) continue;
+1635 |         if (params[k] instanceof Array) {
+1636 |             for (var i = 0; i < params[k].length; i++) body += '&' + k + '=' + encodeURIComponent(params[k][i]);
+1637 |         } else {
+1638 |             body += '&' + k + '=' + encodeURIComponent(params[k]);
+1639 |         }
+1640 |     }
+1641 |     xhr.open('POST', thisPage, true);
+1642 |     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+1643 |     xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+1644 |     xhr.onreadystatechange = function() {
+1645 |         if (xhr.readyState != 4) return;
+1646 |         if (xhr.status == 401) {
+1647 |             alert('로그인이 끝났습니다. 다시 로그인하세요.');
+1648 |             location.href = thisPage + '?cmd=login';
+1649 |             return;
+1650 |         }
+1651 |         var res = null;
+1652 |         try { res = JSON.parse(xhr.responseText); } catch (e) { alert('서버 응답 오류'); return; }
+1653 |         if (res.ok === false) {
+1654 |             if (onFail) onFail(res); else alert(res.msg);
+1655 |             return;
+1656 |         }
+1657 |         if (onOk) onOk(res);
+1658 |     };
+1659 |     xhr.send(body);
+1660 | }
+1661 | 
+1662 | // 폼 값을 {이름: 값} 으로 (같은 이름이 여러 개면 배열)
+1663 | function formToParams(form) {
+1664 |     var p = {};
+1665 |     for (var i = 0; i < form.elements.length; i++) {
+1666 |         var el = form.elements[i];
+1667 |         if (!el.name || el.disabled) continue;
+1668 |         if ((el.type == 'checkbox' || el.type == 'radio') && !el.checked) continue;
+1669 |         if (p[el.name] === undefined) p[el.name] = el.value;
+1670 |         else if (p[el.name] instanceof Array) p[el.name].push(el.value);
+1671 |         else p[el.name] = [p[el.name], el.value];
+1672 |     }
+1673 |     return p;
+1674 | }
+1675 | 
+1676 | function goCmd(cmd, qs) { location.href = thisPage + '?cmd=' + cmd + (qs ? '&' + qs : ''); }
+1677 | function fmtNum(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+1678 | function numOnly(el) { el.value = el.value.replace(/[^0-9]/g, ''); }
+1679 | function chkDate(v) { return /^\d{4}-\d{2}-\d{2}$/.test(v); }
+1680 | 
+1681 | // 품목 입력 그리드 (견적 · 수주 화면이 같이 쓴다).  화면에서 prodOpts(<option> 문자열)를 먼저 정의해 둘 것
+1682 | function addItemRow(pid, qty) {
+1683 |     var tr = document.createElement('tr');
+1684 |     tr.innerHTML = '<td><select name="productId" onchange="onProdSelect(this)"><option value="">선택</option>' + prodOpts + '</select></td>'
+1685 |         + '<td><input type="text" name="qty" size="4" value="' + (qty || 1) + '" onkeyup="numOnly(this);calcItems()"/></td><td class="num">0</td><td class="num">0</td>';
+1686 |     document.getElementById('tblItem').getElementsByTagName('tbody')[0].appendChild(tr);
+1687 |     if (pid) { tr.getElementsByTagName('select')[0].value = pid; onProdSelect(tr.getElementsByTagName('select')[0]); }
+1688 | }
+1689 | // 제품을 고르면 기준일(오늘) 단가를 제품 쪽 cmd 로 읽어 온다
+1690 | function onProdSelect(sel) {
+1691 |     var tr = sel.parentNode.parentNode;
+1692 |     if (sel.value == '') return;
+1693 |     callCmd('priceInfo', { productId: sel.value }, function(res) {
+1694 |         tr.cells[2].innerHTML = fmtNum(res.unitPrice);
+1695 |         tr.cells[2].setAttribute('data-p', res.unitPrice);
+1696 |         calcItems();
+1697 |     });
+1698 | }
+1699 | function calcItems() {
+1700 |     var rows = document.getElementById('tblItem').getElementsByTagName('tbody')[0].rows, total = 0;
+1701 |     for (var i = 0; i < rows.length; i++) {
+1702 |         var amt = Number(rows[i].cells[2].getAttribute('data-p') || 0) * Number(rows[i].cells[1].getElementsByTagName('input')[0].value || 0);
+1703 |         rows[i].cells[3].innerHTML = fmtNum(amt);
+1704 |         total += amt;
+1705 |     }
+1706 |     document.getElementById('bTotal').innerHTML = fmtNum(total);
+1707 | }
+1708 | // 거래처 찾기 : 거래처 쪽 목록 cmd 를 불러 링크로 보여 준다 (pickFn = 눌렀을 때 부를 함수)
+1709 | function findCust(wordId, listId, pickFn) {
+1710 |     callCmd('custListData', { searchWord: document.getElementById(wordId).value, pageSize: 10 }, function(res) {
+1711 |         var html = '';
+1712 |         for (var i = 0; i < res.list.length; i++) {
+1713 |             html += '<a href="javascript:' + pickFn + '(\'' + res.list[i].custId + '\', \'' + res.list[i].custNm + '\')">' + res.list[i].custNm + '</a> ';
+1714 |         }
+1715 |         document.getElementById(listId).innerHTML = html;
+1716 |     });
+1717 | }
+1718 | 
+1719 | // 필수 입력 검사 : names = ['custNm:거래처명', ...]
+1720 | function chkRequired(form, names) {
+1721 |     for (var i = 0; i < names.length; i++) {
+1722 |         var kv = names[i].split(':');
+1723 |         if (form[kv[0]].value.replace(/\s/g, '') == '') {
+1724 |             alert(kv[1] + ' 을(를) 입력하세요.');
+1725 |             form[kv[0]].focus();
+1726 |             return false;
+1727 |         }
+1728 |     }
+1729 |     return true;
+1730 | }
+1731 | </script>
+1732 | </head>
+1733 | <body>
+1734 | <% if (loginUser != null) { %>
+1735 | <div id="topbar">
+1736 |     <span class="logo">SMS 영업관리</span>
+1737 |     <a href="javascript:goCmd('main')">대시보드</a>
+1738 |     <a href="javascript:goCmd('custList')">거래처</a>
+1739 |     <a href="javascript:goCmd('opptyList')">영업기회</a>
+1740 |     <a href="javascript:goCmd('quoteList')">견적</a>
+1741 |     <a href="javascript:goCmd('orderList')">수주</a>
+1742 |     <a href="javascript:goCmd('contractList')">계약</a>
+1743 |     <a href="javascript:goCmd('billList')">청구</a>
+1744 |     <a href="javascript:goCmd('collectList')">수금</a>
+1745 |     <a href="javascript:goCmd('arrearsList')">미수</a>
+1746 |     <a href="javascript:goCmd('prodList')">제품</a>
+1747 |     <a href="javascript:goCmd('salesReport')">리포트</a>
+1748 |     <a href="javascript:goCmd('noticeList')">공지</a>
+1749 |     <%-- 2018.11 메뉴에서 뺌 (영업팀이 안 쓴다고 해서) : <a href="javascript:goCmd('custHist')">거래처 이력</a> --%>
+1750 | <% if ("ADMIN".equals(authCd)) { %>
+1751 |     <a href="javascript:goCmd('codeList')">공통코드</a>
+1752 | <% } %>
+1753 |     <span class="who"><%= esc(loginNm) %> (<%= esc(authCd) %>) <a href="<%= thisPage %>?cmd=logout">로그아웃</a></span>
+1754 | </div>
+1755 | <% } %>
+1756 | <div id="wrap">
+1757 | <%
+1758 |     // ================================================================
+1759 |     //  [화면 cmd]  cmd 별 화면.  목록 데이터는 화면 열 때 여기서 바로 읽거나, 화면의 JS 가 위의 처리 cmd 를 부른다
+1760 |     // ================================================================
+1761 |     if ("login".equals(cmd)) {
+1762 | %>
+1763 | <div class="loginbox">
+1764 |     <h2>SMS 영업관리시스템</h2>
+1765 |     <% if ("1".equals(request.getParameter("err"))) { %><p class="err">아이디 또는 비밀번호가 일치하지 않습니다.</p><% } %>
+1766 |     <% if ("2".equals(request.getParameter("err"))) { %><p class="err">로그인 중 오류가 났습니다. 관리자에게 문의하세요.</p><% } %>
+1767 |     <form name="frmLogin" method="post" action="<%= thisPage %>" onsubmit="return chkLogin(this);">
+1768 |         <input type="hidden" name="cmd" value="doLogin"/>
+1769 |         <p>아이디 <input type="text" name="userId" maxlength="20"/></p>
+1770 |         <p>비밀번호 <input type="password" name="passwd" maxlength="30"/></p>
+1771 |         <p><button type="submit" class="btn btn-main">로그인</button></p>
+1772 |     </form>
+1773 | </div>
+1774 | <script type="text/javascript">
+1775 | function chkLogin(f) {
+1776 |     if (f.userId.value == '') { alert('아이디를 입력하세요.'); f.userId.focus(); return false; }
+1777 |     if (f.passwd.value == '') { alert('비밀번호를 입력하세요.'); f.passwd.focus(); return false; }
+1778 |     return true;
+1779 | }
+1780 | document.frmLogin.userId.focus();
+1781 | </script>
+1782 | <%
+1783 |     } else if ("main".equals(cmd)) {
+1784 |         // 대시보드 : 이번 달 수주와 미수 건수는 화면을 열 때 바로 읽는다 (2021.03 김철수)
+1785 |         String strMonth = today("yyyy-MM");
+1786 |         long lMonthOrderAmt = 0L, lArrearsCnt = 0L;
+1787 |         Connection conn = null;
+1788 |         try {
+1789 |             conn = getConn();
+1790 |             lMonthOrderAmt = queryLong(conn, "SELECT IFNULL(SUM(ORDER_AMT), 0) FROM TB_ORDER WHERE DATE_FORMAT(ORDER_DT, '%Y-%m') = ? AND ORDER_STATUS != '취소'",
+1791 |                     new Object[] { strMonth }, 0L);
+1792 |             lArrearsCnt = queryLong(conn, "SELECT COUNT(*) FROM TB_BILL B WHERE B.ISSUE_STATUS = '10' "
+1793 |                     + "AND B.TOTAL_AMT > IFNULL((SELECT SUM(L.COLLECT_AMT) FROM TB_COLLECT L WHERE L.BILL_ID = B.BILL_ID), 0)", null, 0L);
+1794 |         } catch (Exception e) {
+1795 |             printErr(out, "대시보드 조회", e);
+1796 |         } finally {
+1797 |             closeAll(null, null, conn);
+1798 |         }
+1799 | %>
+1800 | <h2>대시보드 (<%= strMonth %>)</h2>
+1801 | <div class="cards">
+1802 |     <div>이번 달 수주<b><%= fmtAmt(lMonthOrderAmt) %>원</b></div>
+1803 |     <div>미수 청구<b><%= lArrearsCnt %>건</b></div>
+1804 |     <div>로그인<b><%= esc(loginNm) %></b></div>
+1805 | </div>
+1806 | <h3>최근 등록 거래처</h3><ul id="ulCust"></ul>
+1807 | <h3>최근 수주</h3><ul id="ulOrder"></ul>
+1808 | <h3>30일 넘은 미수</h3><ul id="ulArrears"></ul>
+1809 | <script type="text/javascript">
+1810 | window.onload = function() { loadCust(); loadOrder(); loadArrears(); };
+1811 | 
+1812 | // 아래 세 함수는 각각 거래처 · 수주 · 수금 쪽 cmd 를 부른다
+1813 | function loadCust() {
+1814 |     callCmd('custListData', { pageNo: 1, pageSize: 5, sortCol: 'C.REG_DT', sortDir: 'DESC' }, function(res) {
+1815 |         var html = '';
+1816 |         for (var i = 0; i < res.list.length; i++) html += '<li>' + res.list[i].custNm + ' (' + res.list[i].custGradeNm + ')</li>';
+1817 |         document.getElementById('ulCust').innerHTML = html;
+1818 |     });
+1819 | }
+1820 | function loadOrder() {
+1821 |     callCmd('orderListData', { pageNo: 1, pageSize: 5 }, function(res) {
+1822 |         var html = '';
+1823 |         for (var i = 0; i < res.list.length; i++) {
+1824 |             var r = res.list[i];
+1825 |             html += '<li>' + r.orderDt + ' ' + r.custNm + ' ' + fmtNum(r.orderAmt) + '원 [' + r.orderStatus + ']</li>';
+1826 |         }
+1827 |         document.getElementById('ulOrder').innerHTML = html;
+1828 |     });
+1829 | }
+1830 | function loadArrears() {
+1831 |     callCmd('arrearsData', { overdueDays: 30 }, function(res) {
+1832 |         var html = '';
+1833 |         for (var i = 0; i < res.list.length && i < 5; i++) {
+1834 |             html += '<li>' + res.list[i].custNm + ' ' + fmtNum(res.list[i].arrearsAmt) + '원 (' + res.list[i].overdueDays + '일)</li>';
+1835 |         }
+1836 |         document.getElementById('ulArrears').innerHTML = html;
+1837 |     });
+1838 | }
+1839 | </script>
+1840 | <%
+1841 |     } else if ("noticeList".equals(cmd)) {
+1842 |         // 공지 목록 (TB_NOTICE) : 최근 50건
+1843 |         List<HashMap<String, Object>> noticeRows = new ArrayList<HashMap<String, Object>>();
+1844 |         Connection conn = null;
+1845 |         try {
+1846 |             conn = getConn();
+1847 |             noticeRows = queryList(conn, "SELECT NOTICE_ID, TITLE, WRITER_ID, VIEW_CNT, TOP_YN, REG_DT FROM TB_NOTICE ORDER BY TOP_YN DESC, NOTICE_ID DESC LIMIT 50", null);
+1848 |         } catch (Exception e) {
+1849 |             printErr(out, "공지 조회", e);
+1850 |         } finally {
+1851 |             closeAll(null, null, conn);
+1852 |         }
+1853 | %>
+1854 | <h2>공지사항</h2>
+1855 | <table class="list">
+1856 |     <thead><tr><th>번호</th><th>제목</th><th>작성자</th><th>조회</th><th>등록일</th></tr></thead>
+1857 |     <tbody>
+1858 | <% for (HashMap<String, Object> n : noticeRows) { %>
+1859 |         <tr><td><%= n.get("NOTICE_ID") %></td>
+1860 |             <td><a href="javascript:goCmd('noticeView', 'noticeId=<%= n.get("NOTICE_ID") %>')"><%= "Y".equals(n.get("TOP_YN")) ? "[필독] " : "" %><%= esc(n.get("TITLE")) %></a></td>
+1861 |             <td><%= esc(n.get("WRITER_ID")) %></td><td><%= n.get("VIEW_CNT") %></td><td><%= n.get("REG_DT") %></td></tr>
+1862 | <% } %>
+1863 |     </tbody>
+1864 | </table>
+1865 | <% if (!"USER".equals(authCd)) { %>
+1866 | <h3>공지 등록</h3>
+1867 | <form name="frmNotice" onsubmit="return false;">
+1868 |     <table class="formtbl">
+1869 |         <tr><th>제목</th><td><input type="text" name="title" size="60" maxlength="200"/></td></tr>
+1870 |         <tr><th>내용</th><td><textarea name="content" cols="60" rows="5"></textarea></td></tr>
+1871 |         <tr><th>상단 고정</th><td><input type="checkbox" name="topYn" value="Y"/> 필독 공지</td></tr>
+1872 |     </table>
+1873 |     <p><button type="button" class="btn btn-main" onclick="fnNoticeSave()">등록</button></p>
+1874 | </form>
+1875 | <% } %>
+1876 | <script type="text/javascript">
+1877 | function fnNoticeSave() {
+1878 |     var f = document.frmNotice;
+1879 |     if (!chkRequired(f, ['title:제목', 'content:내용'])) return;
+1880 |     callCmd('noticeSave', formToParams(f), function() { goCmd('noticeList'); });
+1881 | }
+1882 | </script>
+1883 | <%
+1884 |     } else if ("noticeView".equals(cmd)) {
+1885 |         // 공지 보기 : 열 때마다 조회수를 올린다 (조회 화면에서 바로 UPDATE).  2016.04 에 만든 화면이라 직접 JDBC
+1886 |         HashMap<String, Object> notice = null;
+1887 |         String strNoticeId = request.getParameter("noticeId");
+1888 |         Connection conn = null;
+1889 |         Statement st = null;
+1890 |         ResultSet rs = null;
+1891 |         try {
+1892 |             conn = getConn();
+1893 |             st = conn.createStatement();
+1894 |             st.executeUpdate("UPDATE TB_NOTICE SET VIEW_CNT = VIEW_CNT + 1 WHERE NOTICE_ID = " + strNoticeId);
+1895 |             rs = st.executeQuery("SELECT NOTICE_ID, TITLE, CONTENT, WRITER_ID, VIEW_CNT, REG_DT FROM TB_NOTICE WHERE NOTICE_ID = " + strNoticeId);
+1896 |             if (rs.next()) {
+1897 |                 notice = new HashMap<String, Object>();
+1898 |                 for (String k : new String[] { "NOTICE_ID", "TITLE", "CONTENT", "WRITER_ID", "VIEW_CNT", "REG_DT" }) {
+1899 |                     notice.put(k, rs.getObject(k));
+1900 |                 }
+1901 |             }
+1902 |         } catch (Exception e) {
+1903 |             printErr(out, "공지 조회", e);
+1904 |         } finally {
+1905 |             closeAll(rs, st, conn);
+1906 |         }
+1907 |         if (notice == null) {
+1908 | %>
+1909 | <p class="err">공지를 찾을 수 없습니다.</p>
+1910 | <%      } else { %>
+1911 | <h2><%= esc(notice.get("TITLE")) %></h2>
+1912 | <p><small>작성자 <%= esc(notice.get("WRITER_ID")) %> · 조회 <%= notice.get("VIEW_CNT") %> · <%= notice.get("REG_DT") %></small></p>
+1913 | <div style="background:#fff;padding:12px;border:1px solid #ddd;white-space:pre-wrap"><%= esc(notice.get("CONTENT")) %></div>
+1914 | <p><button type="button" class="btn" onclick="goCmd('noticeList')">목록</button></p>
+1915 | <%      }
